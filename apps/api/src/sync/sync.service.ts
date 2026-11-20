@@ -9,6 +9,7 @@ import {
   VERSION_PROTOCOLE_SYNC,
   type DemandeDescente, type ReponseDescente, type DemandeRemontee,
   type ReponseRemontee, type AccuseReception, type ArticleSync, type ClientSync,
+  type SessionSync,
   type PromotionSync, type UtilisateurSync,
 } from '@gestglobale/shared';
 import { permissionsEffectives } from '../auth/permissions.util';
@@ -237,6 +238,12 @@ export class SyncService {
       return choisi ? c(choisi.prixCentimes) : null;
     };
 
+    // Un pack porte son prix dans la categorie PACK : sans cette reprise,
+    // il descendrait a zero et la caisse le vendrait gratuitement.
+    const prixVente = article.packDeId
+      ? (prix('PACK') ?? prix('DETAIL') ?? 0)
+      : (prix('DETAIL') ?? prix('PACK') ?? 0);
+
     return {
       id: article.id,
       reference: article.reference,
@@ -245,7 +252,7 @@ export class SyncService {
       unite: article.unite,
       decimales: article.decimales,
       tauxTva: article.tauxTva,
-      prixDetailCentimes: prix('DETAIL') ?? 0,
+      prixDetailCentimes: prixVente,
       prixGrosCentimes: prix('GROS'),
       prixCat3Centimes: prix('CAT3'),
       prixCat4Centimes: prix('CAT4'),
@@ -290,6 +297,13 @@ export class SyncService {
     const caisse = await this.caisseDepuis(demande.codeMagasin, demande.numeroCaisse);
     const contexte = { magasinId: caisse.magasinId, caisseId: caisse.id };
 
+    // Les sessions passent en premier : un ticket ne peut se rattacher qu'a
+    // une session deja connue du serveur.
+    const sessions: AccuseReception[] = [];
+    for (const session of demande.sessions ?? []) {
+      sessions.push(await this.enregistrerSession(session, caisse.id));
+    }
+
     const tickets: AccuseReception[] = [];
     for (const ticket of demande.tickets) {
       const resultat = await this.ventes.enregistrerTicket(ticket, contexte);
@@ -303,16 +317,9 @@ export class SyncService {
       }
     }
 
-    const clotures: AccuseReception[] = [];
-    for (const cloture of demande.clotures) {
-      const resultat = await this.caisse.enregistrerClotureRemontee(cloture);
-      clotures.push({
-        numero: resultat.numero,
-        statut: resultat.statut,
-        erreur: resultat.erreur ?? null,
-      });
-    }
-
+    // Les mouvements de tiroir passent AVANT les clotures : ils ont eu lieu
+    // pendant la session, donc avant sa fermeture. Les traiter apres
+    // reviendrait a les presenter sur une session deja cloturee.
     const mouvements: AccuseReception[] = [];
     for (const mouvement of demande.mouvements) {
       try {
@@ -338,6 +345,10 @@ export class SyncService {
         }
         await this.caisse.mouvementCaisse({
           sessionId: session.id,
+          // Rejeu d'un fait passe : la session a pu etre cloturee entre
+          // temps, notamment si la cloture est remontee dans un lot
+          // anterieur. Le mouvement doit tout de meme etre conserve.
+          rejeu: true,
           type: mouvement.type as TypeMouvementCaisse,
           montantCentimes: mouvement.montantCentimes,
           motif: mouvement.motif,
@@ -354,13 +365,23 @@ export class SyncService {
       }
     }
 
+    const clotures: AccuseReception[] = [];
+    for (const cloture of demande.clotures) {
+      const resultat = await this.caisse.enregistrerClotureRemontee(cloture);
+      clotures.push({
+        numero: resultat.numero,
+        statut: resultat.statut,
+        erreur: resultat.erreur ?? null,
+      });
+    }
+
     await this.prisma.curseurSync.upsert({
       where: { caisseId: caisse.id },
       create: { caisseId: caisse.id, derniereRemonteeLe: new Date() },
       update: { derniereRemonteeLe: new Date() },
     });
 
-    const refuses = [...tickets, ...clotures, ...mouvements].filter(
+    const refuses = [...sessions, ...tickets, ...clotures, ...mouvements].filter(
       (a) => a.statut === 'REFUSE',
     );
     if (refuses.length > 0) {
@@ -375,10 +396,56 @@ export class SyncService {
     return {
       versionProtocole: VERSION_PROTOCOLE_SYNC,
       horodatageServeur: new Date().toISOString(),
+      sessions,
       tickets,
       clotures,
       mouvements,
     };
+  }
+
+  /**
+   * Enregistre une session ouverte hors ligne.
+   *
+   * Idempotente sur le numero, lui aussi attribue par la caisse : une
+   * session deja connue est simplement acquittee.
+   */
+  private async enregistrerSession(
+    session: SessionSync,
+    caisseId: string,
+  ): Promise<AccuseReception> {
+    try {
+      const existante = await this.prisma.sessionCaisse.findUnique({
+        where: { numero: session.numero },
+        select: { id: true },
+      });
+      if (existante) {
+        return { numero: session.numero, statut: 'DEJA_RECU', erreur: null };
+      }
+      await this.prisma.sessionCaisse.create({
+        data: {
+          numero: session.numero,
+          caisseId,
+          ouverteLe: new Date(session.ouverteLe),
+          fondDeCaisseCentimes: BigInt(Math.round(session.fondDeCaisseCentimes)),
+          utilisateurOuvertureId: session.utilisateurOuvertureId,
+          horsLigne: session.horsLigne,
+        },
+      });
+      return { numero: session.numero, statut: 'ACCEPTE', erreur: null };
+    } catch (erreur) {
+      if (
+        erreur instanceof Error &&
+        'code' in erreur &&
+        (erreur as { code?: string }).code === 'P2002'
+      ) {
+        return { numero: session.numero, statut: 'DEJA_RECU', erreur: null };
+      }
+      return {
+        numero: session.numero,
+        statut: 'REFUSE',
+        erreur: erreur instanceof Error ? erreur.message : String(erreur),
+      };
+    }
   }
 
   /** Etat de synchronisation de toutes les caisses, pour le gerant. */

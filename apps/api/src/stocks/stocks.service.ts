@@ -22,6 +22,19 @@ export interface DemandeMouvement {
   utilisateurId: string;
   caisseId?: string | null;
   date?: Date;
+  /**
+   * Autorise le stock negatif pour ce mouvement precis.
+   *
+   * Reserve aux faits deja survenus : une vente encaissee en caisse, en
+   * particulier hors ligne. Le client est parti avec la marchandise ; le
+   * refus du mouvement ferait perdre la recette alors que le stock, lui,
+   * a bel et bien baisse. Le negatif qui en resulte est signale par le
+   * rapport `stocksNegatifs` et corrige par un inventaire.
+   *
+   * Les operations prospectives (sortie au back-office, transfert,
+   * casse saisie a posteriori) restent soumises au parametre du magasin.
+   */
+  autoriserNegatif?: boolean;
 }
 
 /** Types de mouvement qui recalculent le CUMP de l'article. */
@@ -83,7 +96,11 @@ export class StocksService {
     const stockAvant = stockExistant[0]?.quantiteMilli ?? 0;
     const stockApres = stockAvant + demande.quantiteMilli;
 
-    if (stockApres < 0 && !(await this.stockNegatifAutorise(tx, demande.emplacementId))) {
+    if (
+      stockApres < 0 &&
+      !demande.autoriserNegatif &&
+      !(await this.stockNegatifAutorise(tx, demande.emplacementId))
+    ) {
       throw new BadRequestException(
         `Stock insuffisant pour ${article.reference} — ${article.designation} : ` +
           `${stockAvant / 1000} disponible, ${Math.abs(demande.quantiteMilli) / 1000} demande`,
@@ -320,6 +337,41 @@ export class StocksService {
         aCommanderMilli: aReassortir - depuisDepot,
       };
     });
+  }
+
+  /**
+   * Stocks passes en negatif : a corriger par un inventaire.
+   *
+   * Un negatif n'est pas une anomalie de la base mais un ecart reel entre
+   * ce que le systeme croit et ce qui est en rayon. L'export de l'ancien
+   * logiciel en comptait deja 136 (section 7).
+   */
+  async stocksNegatifs(magasinIds: string[]) {
+    const lignes = await this.prisma.stock.findMany({
+      where: { quantiteMilli: { lt: 0 }, emplacement: { magasinId: { in: magasinIds } } },
+      orderBy: { quantiteMilli: 'asc' },
+      take: 500,
+      include: {
+        article: {
+          select: { reference: true, designation: true, unite: true, cumpCentimes: true },
+        },
+        emplacement: {
+          select: { code: true, nom: true, magasin: { select: { code: true, nom: true } } },
+        },
+      },
+    });
+
+    return lignes.map((l) => ({
+      articleId: l.articleId,
+      reference: l.article.reference,
+      designation: l.article.designation,
+      unite: l.article.unite,
+      emplacement: l.emplacement,
+      quantiteMilli: l.quantiteMilli,
+      valeurManquanteCentimes: Math.round(
+        (Math.abs(l.quantiteMilli) * c(l.article.cumpCentimes)) / 1000,
+      ),
+    }));
   }
 
   /** Lots arrivant a peremption (M2). */

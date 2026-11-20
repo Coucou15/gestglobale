@@ -186,6 +186,10 @@ export class VentesService {
           utilisateurId: ticket.utilisateurId,
           caisseId: contexte.caisseId,
           date: new Date(ticket.dateVente),
+          // Un ticket encaisse ne se refuse pas : le client est parti avec
+          // la marchandise. Le stock passe en negatif et le rapport des
+          // stocks negatifs le signale pour correction par inventaire.
+          autoriserNegatif: true,
         },
         tx,
       );

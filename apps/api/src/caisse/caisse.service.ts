@@ -319,10 +319,14 @@ export class CaisseService {
     motif: string;
     utilisateurId: string;
     reference?: string;
+    /** Vrai quand le mouvement est rejoue depuis la file d'une caisse. */
+    rejeu?: boolean;
   }) {
     const session = await this.prisma.sessionCaisse.findUnique({ where: { id: params.sessionId } });
     if (!session) throw new NotFoundException('Session introuvable');
-    if (session.statut === StatutSession.CLOTUREE) {
+    // Une saisie directe sur une session close est une erreur ; un rejeu
+    // depuis la caisse decrit un fait deja survenu et doit etre accepte.
+    if (session.statut === StatutSession.CLOTUREE && !params.rejeu) {
       throw new BadRequestException('Session deja cloturee');
     }
     const reference = params.reference ?? `MVC-${Date.now()}-${session.numero}`;

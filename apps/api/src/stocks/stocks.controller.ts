@@ -39,6 +39,13 @@ export class StocksController {
     return this.stocks.peremptionsProches(utilisateur.magasins, jours ? Number(jours) : 7);
   }
 
+  /** Stocks passes en negatif : a corriger par un inventaire. */
+  @Get('negatifs')
+  @Droits(PERMISSIONS.STOCK_VOIR)
+  negatifs(@Utilisateur() utilisateur: UtilisateurConnecte, @Query('magasinId') magasinId?: string) {
+    return this.stocks.stocksNegatifs(magasinId ? [magasinId] : utilisateur.magasins);
+  }
+
   @Get('mouvements')
   @Droits(PERMISSIONS.STOCK_VOIR)
   mouvements(

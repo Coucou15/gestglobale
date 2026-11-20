@@ -17,6 +17,7 @@ export class DemandeRemonteeDto {
   @IsInt() versionProtocole: number;
   @IsString() codeMagasin: string;
   @IsInt() @Min(1) numeroCaisse: number;
+  @IsArray() @IsObject({ each: true }) sessions: never[];
   @IsArray() @IsObject({ each: true }) tickets: never[];
   @IsArray() @IsObject({ each: true }) clotures: never[];
   @IsArray() @IsObject({ each: true }) mouvements: never[];

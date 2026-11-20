@@ -14,7 +14,8 @@
     "db:seed": "pnpm --filter @gestglobale/api seed",
     "dev:api": "pnpm --filter @gestglobale/api dev",
     "dev:bo": "pnpm --filter @gestglobale/backoffice dev",
-    "dev:pos": "pnpm --filter @gestglobale/pos dev"
+    "dev:pos": "pnpm --filter @gestglobale/pos dev",
+    "recette": "bash scripts/recette.sh"
   },
   "devDependencies": {
     "typescript": "5.6.3",
@@ -27,7 +28,9 @@
       "@prisma/engines",
       "prisma",
       "argon2",
-      "esbuild"
+      "esbuild",
+      "better-sqlite3",
+      "electron"
     ]
   }
 }

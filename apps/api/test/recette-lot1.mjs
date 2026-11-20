@@ -211,7 +211,7 @@ async function main() {
     methode: 'POST', jeton: jetonCaissier,
     corps: {
       versionProtocole: 1, codeMagasin: 'SV', numeroCaisse: 3,
-      tickets: [t1, t2, t3], clotures: [], mouvements: [],
+      sessions: [], tickets: [t1, t2, t3], clotures: [], mouvements: [],
     },
   });
   const accuses = remontee.donnees?.tickets ?? [];
@@ -225,7 +225,7 @@ async function main() {
     methode: 'POST', jeton: jetonCaissier,
     corps: {
       versionProtocole: 1, codeMagasin: 'SV', numeroCaisse: 3,
-      tickets: [t1, t2, t3], clotures: [], mouvements: [],
+      sessions: [], tickets: [t1, t2, t3], clotures: [], mouvements: [],
     },
   });
   verifier('Le renvoi des memes tickets est reconnu, pas redouble',

@@ -199,6 +199,22 @@ export interface TicketSync {
   forcageSuperviseurId: string | null;
 }
 
+/**
+ * Session de caisse nee hors ligne.
+ *
+ * Une session peut s'ouvrir, vendre et se cloturer sans jamais voir le
+ * serveur (section 4.7). Elle doit donc remonter comme un document a part
+ * entiere, AVANT ses tickets, sinon ceux-ci n'auraient aucune session a
+ * laquelle se rattacher.
+ */
+export interface SessionSync {
+  numero: string;
+  ouverteLe: string;
+  fondDeCaisseCentimes: Centimes;
+  utilisateurOuvertureId: string;
+  horsLigne: boolean;
+}
+
 export interface ClotureSync {
   numero: string;
   sessionCaisseNumero: string;
@@ -231,6 +247,8 @@ export interface DemandeRemontee {
   versionProtocole: number;
   codeMagasin: string;
   numeroCaisse: number;
+  /** Traitees en premier : les tickets s'y rattachent. */
+  sessions: SessionSync[];
   tickets: TicketSync[];
   clotures: ClotureSync[];
   mouvements: MouvementCaisseSync[];
@@ -248,6 +266,7 @@ export interface AccuseReception {
 export interface ReponseRemontee {
   versionProtocole: number;
   horodatageServeur: string;
+  sessions: AccuseReception[];
   tickets: AccuseReception[];
   clotures: AccuseReception[];
   mouvements: AccuseReception[];
