@@ -1,6 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import {
-  CategorieOperation, Prisma, SensOperation, StatutTransfert,
+  CategorieOperation, Prisma, SensOperation, StatutTransfert, TypeCompte,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { NumerotationService } from '../commun/numerotation.service';
@@ -20,7 +20,32 @@ export interface DemandeOperation {
   transfertId?: string;
   utilisateurId: string;
   date?: Date;
+  /**
+   * Autorise un solde negatif pour cette operation.
+   *
+   * Reserve aux faits deja survenus : un ticket remonte par une caisse,
+   * en particulier un remboursement rendu en especes alors que le tiroir
+   * paraissait vide au serveur. Le caissier a rendu l'argent ; refuser
+   * l'ecriture ne le ferait pas revenir.
+   *
+   * Les saisies du back-office restent soumises au controle.
+   */
+  autoriserNegatif?: boolean;
 }
+
+/**
+ * Comptes dont le solde ne peut pas devenir negatif.
+ *
+ * Un tiroir, une caisse ou un coffre contiennent des billets : on ne peut
+ * pas en sortir ce qui n'y est pas. Une banque ou un CCP, eux, admettent
+ * un decouvert, qui releve de l'accord avec l'etablissement et non du
+ * logiciel.
+ */
+const COMPTES_ESPECES: TypeCompte[] = [
+  TypeCompte.CAISSE,
+  TypeCompte.TIROIR,
+  TypeCompte.COFFRE,
+];
 
 @Injectable()
 export class TresorerieService {
@@ -43,14 +68,30 @@ export class TresorerieService {
       throw new BadRequestException('Le montant d’une operation doit etre positif');
     }
     const executer = async (client: Prisma.TransactionClient) => {
-      const lignes = await client.$queryRaw<Array<{ soldeCentimes: bigint }>>`
-        SELECT "soldeCentimes" FROM "CompteTresorerie" WHERE "id" = ${demande.compteId} FOR UPDATE`;
+      const lignes = await client.$queryRaw<
+        Array<{ soldeCentimes: bigint; type: TypeCompte; libelle: string }>
+      >`
+        SELECT "soldeCentimes", "type", "libelle" FROM "CompteTresorerie"
+         WHERE "id" = ${demande.compteId} FOR UPDATE`;
       if (lignes.length === 0) throw new NotFoundException('Compte de tresorerie introuvable');
 
-      const solde = c(lignes[0].soldeCentimes);
+      const compte = lignes[0];
+      const solde = c(compte.soldeCentimes);
       const delta =
         demande.sens === SensOperation.ENTREE ? demande.montantCentimes : -demande.montantCentimes;
       const soldeApres = solde + delta;
+
+      if (
+        soldeApres < 0 &&
+        !demande.autoriserNegatif &&
+        COMPTES_ESPECES.includes(compte.type)
+      ) {
+        throw new BadRequestException(
+          `Especes insuffisantes sur ${compte.libelle} : ` +
+            `${(solde / 100).toLocaleString('fr-FR')} DA en caisse, ` +
+            `${(demande.montantCentimes / 100).toLocaleString('fr-FR')} DA demandes`,
+        );
+      }
 
       await client.compteTresorerie.update({
         where: { id: demande.compteId },
@@ -106,7 +147,9 @@ export class TresorerieService {
     if (!source) throw new NotFoundException('Compte source introuvable');
     if (c(source.soldeCentimes) < params.montantCentimes) {
       throw new BadRequestException(
-        `Solde insuffisant sur ${source.libelle} : ${c(source.soldeCentimes) / 100} DA disponibles`,
+        `Solde insuffisant sur ${source.libelle} : ` +
+          `${(c(source.soldeCentimes) / 100).toLocaleString('fr-FR')} DA disponibles, ` +
+          `${(params.montantCentimes / 100).toLocaleString('fr-FR')} DA demandes`,
       );
     }
 

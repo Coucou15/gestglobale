@@ -264,6 +264,9 @@ export class VentesService {
             documentNumero: ticket.numero,
             utilisateurId: ticket.utilisateurId,
             date: new Date(ticket.dateVente),
+            // Un encaissement ou un rendu deja effectue en caisse ne se
+            // refuse pas : l'argent a change de mains.
+            autoriserNegatif: true,
           },
           tx,
         );

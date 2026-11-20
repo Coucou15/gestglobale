@@ -31,23 +31,40 @@ export function TableauDeBord({ utilisateur }: { utilisateur: Utilisateur }) {
   const [caisses, setCaisses] = useState<EtatCaisse[]>([]);
   const [tresorerie, setTresorerie] = useState<{ totalCentimes: number } | null>(null);
   const [negatifs, setNegatifs] = useState<number | null>(null);
+  const [alertes, setAlertes] = useState<number | null>(null);
   const [erreur, setErreur] = useState<string | null>(null);
+
+  // Chaque role ne demande que ce qu'il a le droit de voir : un
+  // magasinier n'a pas a declencher un appel aux ventes qui lui sera
+  // refuse, ni a lire un message d'erreur en arrivant sur son ecran.
+  const voitVentes =
+    utilisateur.permissions.includes('rapport.son_magasin') ||
+    utilisateur.permissions.includes('rapport.tous');
+  const voitTresorerie = utilisateur.permissions.includes('tresorerie.voir');
+  const voitStocks = utilisateur.permissions.includes('stock.voir');
+  const voitMarge = utilisateur.permissions.includes('article.voir_prix_achat_et_marge');
 
   const charger = async () => {
     setErreur(null);
     try {
-      const [v, c] = await Promise.all([
-        appeler<VentesJour>('/ventes/jour'),
-        appeler<EtatCaisse[]>('/sync/etat'),
-      ]);
-      setVentes(v);
-      setCaisses(c);
-      if (utilisateur.permissions.includes('tresorerie.voir')) {
+      if (voitVentes) {
+        const [v, c] = await Promise.all([
+          appeler<VentesJour>('/ventes/jour'),
+          appeler<EtatCaisse[]>('/sync/etat'),
+        ]);
+        setVentes(v);
+        setCaisses(c);
+      }
+      if (voitTresorerie) {
         setTresorerie(await appeler('/tresorerie/situation'));
       }
-      if (utilisateur.permissions.includes('stock.voir')) {
-        const liste = await appeler<unknown[]>('/stocks/negatifs');
-        setNegatifs(liste.length);
+      if (voitStocks) {
+        const [negatifsListe, alertesListe] = await Promise.all([
+          appeler<unknown[]>('/stocks/negatifs'),
+          appeler<unknown[]>('/stocks/alertes'),
+        ]);
+        setNegatifs(negatifsListe.length);
+        setAlertes(alertesListe.length);
       }
     } catch (e) {
       setErreur(e instanceof Error ? e.message : String(e));
@@ -77,20 +94,33 @@ export function TableauDeBord({ utilisateur }: { utilisateur: Utilisateur }) {
       {erreur && <div className="message erreur">{erreur}</div>}
 
       <div className="cartes">
-        <div className="carte">
-          <div className="intitule">Chiffre d&apos;affaires TTC</div>
-          <div className="valeur">{formaterDA(ventes?.chiffreAffairesTtcCentimes)}</div>
-          <div className="detail">{ventes?.nombreTickets ?? 0} ticket(s)</div>
-        </div>
-        <div className="carte">
-          <div className="intitule">Panier moyen</div>
-          <div className="valeur">{formaterDA(ventes?.panierMoyenCentimes)}</div>
-        </div>
-        {utilisateur.permissions.includes('article.voir_prix_achat_et_marge') && (
+        {voitVentes && (
+          <>
+            <div className="carte">
+              <div className="intitule">Chiffre d&apos;affaires TTC</div>
+              <div className="valeur">{formaterDA(ventes?.chiffreAffairesTtcCentimes)}</div>
+              <div className="detail">{ventes?.nombreTickets ?? 0} ticket(s)</div>
+            </div>
+            <div className="carte">
+              <div className="intitule">Panier moyen</div>
+              <div className="valeur">{formaterDA(ventes?.panierMoyenCentimes)}</div>
+            </div>
+          </>
+        )}
+        {voitVentes && voitMarge && (
           <div className="carte">
             <div className="intitule">Marge du jour</div>
             <div className="valeur">{formaterDA(ventes?.margeCentimes)}</div>
             <div className="detail">{tauxMarge.toFixed(1).replace('.', ',')} % du HT</div>
+          </div>
+        )}
+        {alertes !== null && (
+          <div className="carte">
+            <div className="intitule">Articles a reassortir</div>
+            <div className="valeur" style={{ color: alertes > 0 ? 'var(--orange)' : undefined }}>
+              {alertes}
+            </div>
+            <div className="detail">sous leur seuil d&apos;alerte</div>
           </div>
         )}
         {tresorerie && (
@@ -108,6 +138,15 @@ export function TableauDeBord({ utilisateur }: { utilisateur: Utilisateur }) {
         )}
       </div>
 
+      {!voitVentes && (
+        <p className="discret">
+          Votre role ne donne pas acces aux ventes. Les indicateurs ci-dessus concernent le
+          stock dont vous avez la charge.
+        </p>
+      )}
+
+      {voitVentes && (
+      <>
       <h2 style={{ fontSize: 18, marginTop: 28 }}>Reglements du jour</h2>
       <div className="tableau">
         <table>
@@ -159,6 +198,8 @@ export function TableauDeBord({ utilisateur }: { utilisateur: Utilisateur }) {
           </tbody>
         </table>
       </div>
+      </>
+      )}
     </>
   );
 }

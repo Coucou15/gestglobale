@@ -112,6 +112,29 @@ export class StocksController {
     return this.inventaires.ouvrir({ ...dto, utilisateurId: utilisateur.id });
   }
 
+  /** Inventaires du magasin, le plus recent en tete. */
+  @Get('inventaires')
+  @Droits(PERMISSIONS.STOCK_INVENTAIRE_SAISIR)
+  listerInventaires(
+    @Utilisateur() utilisateur: UtilisateurConnecte,
+    @Query('statut') statut?: string,
+  ) {
+    return this.prisma.inventaire.findMany({
+      where: {
+        emplacement: { magasinId: { in: utilisateur.magasins } },
+        ...(statut ? { statut: statut as never } : {}),
+      },
+      orderBy: { debuteLe: 'desc' },
+      take: 50,
+      include: {
+        emplacement: { select: { code: true, nom: true } },
+        utilisateurSaisie: { select: { code: true, nom: true } },
+        utilisateurValidation: { select: { code: true, nom: true } },
+        _count: { select: { lignes: true } },
+      },
+    });
+  }
+
   @Get('inventaires/:id')
   @Droits(PERMISSIONS.STOCK_INVENTAIRE_SAISIR)
   etatInventaire(@Param('id') id: string) {

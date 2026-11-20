@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react';
-import { NavLink, Navigate, Route, Routes } from 'react-router-dom';
+import { useEffect, useState, type ReactElement } from 'react';
+import { NavLink, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import { appeler, effacerSession, jeton } from './client';
 import { Connexion } from './pages/Connexion';
 import { TableauDeBord } from './pages/TableauDeBord';
 import { Articles } from './pages/Articles';
 import { Stocks } from './pages/Stocks';
+import { Achats } from './pages/Achats';
+import { Inventaires } from './pages/Inventaires';
 import { Caisses } from './pages/Caisses';
 import { Tiers } from './pages/Tiers';
 import { Tresorerie } from './pages/Tresorerie';
@@ -23,15 +25,42 @@ const ENTREES = [
   { chemin: '/', libelle: 'Tableau de bord', droit: null },
   { chemin: '/articles', libelle: 'Articles', droit: 'article.voir' },
   { chemin: '/stocks', libelle: 'Stocks', droit: 'stock.voir' },
+  { chemin: '/achats', libelle: 'Receptions', droit: 'achat.voir' },
+  { chemin: '/inventaires', libelle: 'Inventaires', droit: 'stock.inventaire_saisir' },
   { chemin: '/caisses', libelle: 'Caisses', droit: 'rapport.son_magasin' },
   { chemin: '/tiers', libelle: 'Clients et fournisseurs', droit: 'tiers.voir' },
   { chemin: '/tresorerie', libelle: 'Tresorerie', droit: 'tresorerie.voir' },
   { chemin: '/audit', libelle: 'Journal d’audit', droit: 'audit.consulter' },
 ];
 
+/**
+ * Route soumise a un droit.
+ *
+ * Le menu masque deja ce que l'utilisateur ne peut pas voir, mais cela ne
+ * suffit pas : l'adresse reste dans la barre du navigateur apres une
+ * deconnexion, et peut aussi etre saisie a la main. Sans ce controle, un
+ * magasinier qui se connecte apres un gerant retombait sur l'ecran de
+ * tresorerie et n'y voyait qu'une erreur.
+ */
+function RouteProtegee({
+  utilisateur,
+  droit,
+  children,
+}: {
+  utilisateur: Utilisateur;
+  droit: string | null;
+  children: ReactElement;
+}) {
+  if (droit !== null && !utilisateur.permissions.includes(droit)) {
+    return <Navigate to="/" replace />;
+  }
+  return children;
+}
+
 export function Application() {
   const [utilisateur, setUtilisateur] = useState<Utilisateur | null>(null);
   const [chargement, setChargement] = useState(true);
+  const naviguer = useNavigate();
 
   useEffect(() => {
     if (!jeton()) { setChargement(false); return; }
@@ -74,7 +103,13 @@ export function Application() {
           </div>
           <button
             style={{ width: '100%' }}
-            onClick={() => { effacerSession(); setUtilisateur(null); }}
+            onClick={() => {
+              effacerSession();
+              setUtilisateur(null);
+              // On revient a l'accueil : la prochaine personne a se
+              // connecter ne doit pas heriter de l'ecran de la precedente.
+              naviguer('/', { replace: true });
+            }}
           >
             Se deconnecter
           </button>
@@ -84,12 +119,26 @@ export function Application() {
       <main className="contenu">
         <Routes>
           <Route path="/" element={<TableauDeBord utilisateur={utilisateur} />} />
-          <Route path="/articles" element={<Articles utilisateur={utilisateur} />} />
-          <Route path="/stocks" element={<Stocks />} />
-          <Route path="/caisses" element={<Caisses />} />
-          <Route path="/tiers" element={<Tiers />} />
-          <Route path="/tresorerie" element={<Tresorerie />} />
-          <Route path="/audit" element={<Audit />} />
+          {([
+            ['/articles', 'article.voir', <Articles utilisateur={utilisateur} />],
+            ['/stocks', 'stock.voir', <Stocks />],
+            ['/achats', 'achat.voir', <Achats utilisateur={utilisateur} />],
+            ['/inventaires', 'stock.inventaire_saisir', <Inventaires utilisateur={utilisateur} />],
+            ['/caisses', 'rapport.son_magasin', <Caisses />],
+            ['/tiers', 'tiers.voir', <Tiers />],
+            ['/tresorerie', 'tresorerie.voir', <Tresorerie utilisateur={utilisateur} />],
+            ['/audit', 'audit.consulter', <Audit />],
+          ] as Array<[string, string, ReactElement]>).map(([chemin, droit, element]) => (
+            <Route
+              key={chemin}
+              path={chemin}
+              element={
+                <RouteProtegee utilisateur={utilisateur} droit={droit}>
+                  {element}
+                </RouteProtegee>
+              }
+            />
+          ))}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
