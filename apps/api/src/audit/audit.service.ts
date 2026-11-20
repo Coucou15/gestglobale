@@ -15,6 +15,24 @@ export interface EntreeAudit {
 }
 
 /**
+ * Serialisation canonique : les clefs des objets sont triees de maniere
+ * recursive.
+ *
+ * Indispensable ici : PostgreSQL stocke le type Json en `jsonb`, qui ne
+ * conserve pas l'ordre d'insertion des clefs. Sans tri, l'empreinte
+ * recalculee a la relecture differerait de celle calculee a l'ecriture et
+ * la chaine paraitrait rompue alors qu'aucune ligne n'aurait bouge.
+ */
+export function jsonCanonique(valeur: unknown): string {
+  if (valeur === null || typeof valeur !== 'object') return JSON.stringify(valeur) ?? 'null';
+  if (Array.isArray(valeur)) return `[${valeur.map(jsonCanonique).join(',')}]`;
+  const entrees = Object.entries(valeur as Record<string, unknown>)
+    .filter(([, v]) => v !== undefined)
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return `{${entrees.map(([k, v]) => `${JSON.stringify(k)}:${jsonCanonique(v)}`).join(',')}}`;
+}
+
+/**
  * Journal d'audit non modifiable (section 6 du cahier des charges).
  *
  * Chaque entree contient l'empreinte de la precedente. Supprimer ou
@@ -48,7 +66,7 @@ export class AuditService {
     });
 
     const date = new Date();
-    const charge = JSON.stringify({
+    const charge = jsonCanonique({
       date: date.toISOString(),
       utilisateurId: entree.utilisateurId ?? null,
       action: entree.action,
@@ -109,7 +127,7 @@ export class AuditService {
         if (ligne.empreintePrecedente !== attendue) {
           return { intact: false, ruptureAuNumero: ligne.numero.toString() };
         }
-        const charge = JSON.stringify({
+        const charge = jsonCanonique({
           date: ligne.date.toISOString(),
           utilisateurId: ligne.utilisateurId,
           action: ligne.action,

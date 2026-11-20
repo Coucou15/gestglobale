@@ -10,3 +10,4 @@ coverage/
 apps/pos/data/
 apps/api/uploads/
 release/
+/tmp/
