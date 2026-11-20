@@ -15,6 +15,7 @@ import { VentesModule } from './ventes/ventes.module';
 import { CaisseModule } from './caisse/caisse.module';
 import { SyncModule } from './sync/sync.module';
 import { ImportModule } from './import/import.module';
+import { RapportsModule } from './rapports/rapports.module';
 import { DroitsGuard } from './auth/droits.guard';
 
 @Module({
@@ -33,6 +34,7 @@ import { DroitsGuard } from './auth/droits.guard';
     CaisseModule,
     SyncModule,
     ImportModule,
+    RapportsModule,
   ],
   providers: [
     // Toute route est protegee par defaut ; @Public() ouvre explicitement.

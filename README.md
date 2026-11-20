@@ -20,6 +20,12 @@ a M8, l'assistant de migration et la caisse hors ligne.
 **114 verifications automatisees** passent contre une vraie base et une
 API reellement demarree : `pnpm recette`.
 
+Un **test de charge au volume reel** (30 015 articles, 430 tickets sur
+2 caisses) tient les quatre exigences chiffrees de la section 8 avec un a
+deux ordres de grandeur de marge : `pnpm charge`. Il a revele deux
+defauts majeurs de la synchronisation, corriges ; le detail est dans
+[`docs/test-de-charge.md`](docs/test-de-charge.md).
+
 ---
 
 ## Demarrage
@@ -249,6 +255,14 @@ le serveur et enchaine :
 | Nettoyage a l'import | 23 |
 | Recette fonctionnelle du lot 1 | 38 |
 | Coupure reseau de la caisse | 20 |
+
+```bash
+pnpm charge
+```
+
+Ajoute le test de charge au volume reel : generation de 30 000 articles,
+journee de 430 tickets sur 2 caisses, 15 mesures de performance et un
+essai de remontee simultanee. Comptez une dizaine de minutes.
 
 Chaque suite part d'une base fraiche : la numerotation des documents est
 deterministe par caisse, donc rejouer une suite sur une base deja remplie

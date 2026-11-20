@@ -238,6 +238,8 @@ model Article {
   @@index([rayonId])
   @@index([archive, venteAutorisee])
   @@index([designation])
+  /// Parcours par curseur de la descente ; voir migration sync_curseur.
+  @@index([modifieLe, id], map: "Article_sync_idx")
 }
 
 enum TypeCodeBarre {
@@ -553,6 +555,7 @@ model Tiers {
 
   @@index([type, actif])
   @@index([raisonSociale])
+  @@index([modifieLe, id], map: "Tiers_sync_idx")
 }
 
 enum SensMouvementTiers {
@@ -1200,6 +1203,7 @@ model Utilisateur {
   sessionsImport        SessionImport[]
 
   @@index([role, actif])
+  @@index([modifieLe, id], map: "Utilisateur_sync_idx")
 }
 
 model UtilisateurMagasin {
@@ -1291,6 +1295,7 @@ model Promotion {
   lignes  LigneVente[]
 
   @@index([actif, debut, fin])
+  @@index([modifieLe, id], map: "Promotion_sync_idx")
 }
 
 enum TypeBon {

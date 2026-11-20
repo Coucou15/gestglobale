@@ -23,7 +23,7 @@ a venir = non commence.
 | M6 | Tiers | 1 | **fait** |
 | M7 | Tresorerie | 1 | *partiel* — API complete, ecrans de saisie a faire |
 | M8 | Utilisateurs et droits | 1 | **fait** |
-| M9 | Tableaux de bord et rapports | 2 | *partiel* — chiffres du jour, ecarts de caisse, stocks negatifs ; exports Excel et PDF et resume quotidien a faire |
+| M9 | Tableaux de bord et rapports | 2 | *partiel* — chiffres du jour, rapport de periode, top et flop produits, produits dormants, ecarts de caisse, stocks negatifs ; exports Excel et PDF et resume quotidien a faire |
 | M10 | Fidelite et promotions | 2 | *partiel* — modele de donnees et descente vers la caisse faits ; application en vente a faire |
 | M11 | Multi-magasins | 2 | *partiel* — catalogue central, prix par magasin et transferts faits ; consolidation a completer |
 | M12 | Comptabilite et exports | 3 | a venir |
@@ -84,8 +84,9 @@ empreintes avec verification d'integrite.
 |---|---|---|
 | Performance caisse | scan a l'ecran en moins de 0,3 s | **tenu** — recherche par cle primaire, independante de la taille du catalogue |
 | Performance caisse | validation d'un ticket en moins de 1 s, hors ligne comprise | **tenu et mesure** par le test de coupure reseau |
-| Performance back-office | recherche dans 30 000 articles en moins de 1 s | **a mesurer** sur le volume reel ; les index sont en place |
-| Capacite | 10 magasins, 30 caisses, 50 utilisateurs, 100 000 articles, 5 ans | **a eprouver** par un test de charge |
+| Performance back-office | recherche dans 30 000 articles en moins de 1 s | **tenu et mesure** — 42 ms median, 70 ms au 95e centile sur 30 015 articles |
+| Performance rapports | rapport mensuel en moins de 5 s | **tenu et mesure** — 5,5 ms |
+| Capacite | 10 magasins, 30 caisses, 50 utilisateurs, 100 000 articles, 5 ans | **partiellement eprouve** — 30 000 articles et 2 caisses mesures ; 30 caisses simultanees et 5 ans d'historique restent a simuler |
 | Disponibilite | les caisses vendent meme serveur arrete | **tenu et verifie** |
 | Sauvegardes | chaque nuit, copie hors site, retention 30 jours, test mensuel | **a mettre en place** a l'installation |
 | Securite | HTTPS, mots de passe chiffres, double authentification, aucun port de base ouvert | **tenu** cote applicatif ; le tunnel reste a installer |
@@ -103,7 +104,7 @@ empreintes avec verification d'integrite.
 |---|---|
 | Import complet : 28 272 produits, 21 198 codes-barres, 1 735 packs, 450 vracs, 7 021 clients, 692 fournisseurs, sans perte | **assistant pret**, a eprouver sur le fichier reel |
 | Valeur du stock au CUMP et soldes tiers identiques a l'ancien logiciel | **controles exposes**, a comparer lors de l'import a blanc |
-| Une journee type (environ 430 tickets sur 2 caisses) rejouee sans erreur | **121 tickets rejoues** par la recette ; a porter a 430 sur le volume reel |
+| Une journee type (environ 430 tickets sur 2 caisses) rejouee sans erreur | **verifie** — 430 tickets et 2 780 lignes rejoues sur 30 015 articles |
 | Coupure reseau de 2 heures : 100 % des tickets retrouves, sans doublon | **verifie** |
 | Cloture Z avec comptage, ecart calcule et justifie | **verifie** |
 | Un caissier sans droit ne peut ni annuler, ni modifier un prix, ni voir les marges | **verifie** |
@@ -157,8 +158,9 @@ continuer, mais chacun changera du code s'il est tranche plus tard.
    sa douchette, son imprimante et son tiroir.
 3. Completer les ecrans de saisie du back-office : receptions, inventaires,
    depenses.
-4. Mesurer les performances sur le volume reel : 28 272 articles, 430
-   tickets par jour, 2 caisses.
+4. Refaire le test de charge sur le serveur du client : le ProLiant
+   ML330 G6 n'a pas de SSD et les durees y seront moins bonnes que dans
+   l'environnement de developpement.
 5. Mettre en place les sauvegardes et le tunnel chiffre, puis eprouver une
    restauration complete.
 6. Pilote sur un magasin, formation des caissiers, puis bascule.

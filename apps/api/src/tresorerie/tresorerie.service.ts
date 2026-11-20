@@ -57,7 +57,7 @@ export class TresorerieService {
         data: { soldeCentimes: b(soldeApres) },
       });
 
-      const numero = await this.numerotation.suivant('TRE', { tx: client });
+      const numero = await this.numerotation.sequence('TRE', 'operation_tresorerie_numero_seq', client);
       await client.operationTresorerie.create({
         data: {
           numero,

@@ -160,7 +160,7 @@ export class StocksService {
       });
     }
 
-    const numero = await this.numerotation.suivant('MVT', { tx });
+    const numero = await this.numerotation.sequence('MVT', 'mouvement_stock_numero_seq', tx);
     await tx.mouvementStock.create({
       data: {
         numero,

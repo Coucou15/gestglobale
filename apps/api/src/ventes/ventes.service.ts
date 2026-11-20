@@ -139,6 +139,18 @@ export class VentesService {
 
     let margeTotale = 0;
 
+    // Les sorties de stock sont collectees ici puis appliquees en bloc,
+    // triees par article. Deux tickets concurrents qui portent les memes
+    // articles dans un ordre de lignes different verrouilleraient sinon
+    // les memes lignes de stock en ordre inverse, situation dont
+    // PostgreSQL ne sort qu'en abattant l'une des deux transactions. Le
+    // ticket serait refuse alors qu'il est deja encaisse.
+    //
+    // Je n'ai pas reussi a provoquer l'interblocage sur 122 tickets
+    // concurrents ; l'ordre deterministe le rend simplement impossible,
+    // et il ne coute rien.
+    const sortiesStock: Array<{ articleId: string; quantiteMilli: number }> = [];
+
     for (const ligne of ticket.lignes) {
       if (ligne.annulee) {
         // Une ligne annulee est conservee pour l'audit mais ne sort pas
@@ -174,12 +186,21 @@ export class VentesService {
         },
       });
 
+      sortiesStock.push({
+        articleId: articleStockId,
+        quantiteMilli: signe * quantiteStock,
+      });
+    }
+
+    sortiesStock.sort((a, b) => (a.articleId < b.articleId ? -1 : a.articleId > b.articleId ? 1 : 0));
+
+    for (const sortie of sortiesStock) {
       await this.stocks.appliquer(
         {
           type: estRetour ? TypeMouvement.RETOUR_CLIENT : TypeMouvement.VENTE,
-          articleId: articleStockId,
+          articleId: sortie.articleId,
           emplacementId: emplacement.id,
-          quantiteMilli: signe * quantiteStock,
+          quantiteMilli: sortie.quantiteMilli,
           documentType: 'TICKET',
           documentId: document.id,
           documentNumero: ticket.numero,

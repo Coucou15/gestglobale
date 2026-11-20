@@ -15,7 +15,8 @@
     "dev:api": "pnpm --filter @gestglobale/api dev",
     "dev:bo": "pnpm --filter @gestglobale/backoffice dev",
     "dev:pos": "pnpm --filter @gestglobale/pos dev",
-    "recette": "bash scripts/recette.sh"
+    "recette": "bash scripts/recette.sh",
+    "charge": "AVEC_CHARGE=1 bash scripts/recette.sh"
   },
   "devDependencies": {
     "typescript": "5.6.3",

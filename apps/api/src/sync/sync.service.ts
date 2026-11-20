@@ -17,28 +17,98 @@ import { permissionsEffectives } from '../auth/permissions.util';
 /**
  * Curseur de descente.
  *
- * Il encode l'horodatage de la derniere modification vue et l'identifiant
- * de la derniere entite servie. Le couple (date, id) est strictement
- * croissant, donc aucune ligne ne peut etre sautee ni servie deux fois,
- * meme quand plusieurs entites partagent la meme milliseconde.
+ * Il porte une position PAR ENTITE, et non une position unique partagee.
+ *
+ * Un curseur unique etait faux : la position retenue etait la date la plus
+ * recente vue toutes entites confondues. Comme les clients sont modifies
+ * apres les articles lors d'un import, le curseur sautait au-dela des
+ * articles restants, qui n'atteignaient jamais les caisses. Le defaut
+ * etait invisible tant que tout tenait dans une page ; sur 30 000
+ * articles, 500 seulement descendaient.
+ *
+ * Chaque position est le couple (date de modification, identifiant), qui
+ * est strictement croissant pour l'ordre de tri employe : aucune ligne ne
+ * peut etre sautee ni servie deux fois, meme quand des milliers d'entites
+ * partagent la meme milliseconde.
  */
-interface Curseur {
+interface Position {
   date: number;
   id: string;
 }
 
+interface Curseur {
+  v: 2;
+  articles: Position;
+  clients: Position;
+  promotions: Position;
+  utilisateurs: Position;
+  tombstones: number;
+}
+
+const POSITION_INITIALE: Position = { date: 0, id: '' };
+
+function curseurVide(): Curseur {
+  return {
+    v: 2,
+    articles: { ...POSITION_INITIALE },
+    clients: { ...POSITION_INITIALE },
+    promotions: { ...POSITION_INITIALE },
+    utilisateurs: { ...POSITION_INITIALE },
+    tombstones: 0,
+  };
+}
+
+function lirePosition(valeur: unknown): Position {
+  if (typeof valeur !== 'object' || valeur === null) return { ...POSITION_INITIALE };
+  const p = valeur as { date?: unknown; id?: unknown };
+  return { date: Number(p.date) || 0, id: typeof p.id === 'string' ? p.id : '' };
+}
+
 function lireCurseur(valeur: string | null | undefined): Curseur {
-  if (!valeur) return { date: 0, id: '' };
+  if (!valeur) return curseurVide();
   try {
     const decode = JSON.parse(Buffer.from(valeur, 'base64url').toString('utf8'));
-    return { date: Number(decode.date) || 0, id: String(decode.id ?? '') };
+    // Un curseur de l'ancien format est ignore : la caisse refait une
+    // descente complete, ce qui est sans danger (tout est idempotent).
+    if (decode?.v !== 2) return curseurVide();
+    return {
+      v: 2,
+      articles: lirePosition(decode.articles),
+      clients: lirePosition(decode.clients),
+      promotions: lirePosition(decode.promotions),
+      utilisateurs: lirePosition(decode.utilisateurs),
+      tombstones: Number(decode.tombstones) || 0,
+    };
   } catch {
-    return { date: 0, id: '' };
+    return curseurVide();
   }
 }
 
 function ecrireCurseur(curseur: Curseur): string {
   return Buffer.from(JSON.stringify(curseur), 'utf8').toString('base64url');
+}
+
+/** Filtre « strictement apres cette position », pour l'ordre (modifieLe, id). */
+function apres(position: Position): {
+  OR: Array<{ modifieLe: { gt: Date } } | { modifieLe: Date; id: { gt: string } }>;
+} {
+  const date = new Date(position.date);
+  return {
+    OR: [
+      { modifieLe: { gt: date } },
+      { modifieLe: date, id: { gt: position.id } },
+    ],
+  };
+}
+
+/** Position de la derniere ligne servie, ou la position precedente. */
+function positionApres<T extends { id: string; modifieLe: Date }>(
+  lignes: T[],
+  precedente: Position,
+): Position {
+  if (lignes.length === 0) return precedente;
+  const derniere = lignes[lignes.length - 1];
+  return { date: derniere.modifieLe.getTime(), id: derniere.id };
 }
 
 const TAILLE_PAGE_DEFAUT = 500;
@@ -82,54 +152,61 @@ export class SyncService {
     const caisse = await this.caisseDepuis(demande.codeMagasin, demande.numeroCaisse);
     const curseur = lireCurseur(demande.curseur);
     const limite = Math.min(demande.limite ?? TAILLE_PAGE_DEFAUT, TAILLE_PAGE_MAX);
-    const depuis = new Date(curseur.date);
 
     const [articles, clients, promotions, utilisateurs, tombstones] = await Promise.all([
-      this.articlesModifies(depuis, curseur.id, limite, caisse.magasinId),
+      this.articlesModifies(curseur.articles, limite, caisse.magasinId),
       this.prisma.tiers.findMany({
-        where: { modifieLe: { gte: depuis }, actif: true },
+        where: { ...apres(curseur.clients), actif: true },
         orderBy: [{ modifieLe: 'asc' }, { id: 'asc' }],
         take: limite,
       }),
       this.prisma.promotion.findMany({
-        where: { modifieLe: { gte: depuis }, actif: true, fin: { gte: new Date() } },
+        where: { ...apres(curseur.promotions), actif: true, fin: { gte: new Date() } },
         orderBy: [{ modifieLe: 'asc' }, { id: 'asc' }],
         take: limite,
       }),
       this.prisma.utilisateur.findMany({
         where: {
-          modifieLe: { gte: depuis },
+          ...apres(curseur.utilisateurs),
           magasins: { some: { magasinId: caisse.magasinId } },
         },
         orderBy: [{ modifieLe: 'asc' }, { id: 'asc' }],
         take: limite,
       }),
-      this.prisma.tombstone.findMany({ where: { date: { gte: depuis } }, take: limite }),
+      this.prisma.tombstone.findMany({
+        where: { date: { gt: new Date(curseur.tombstones) } },
+        orderBy: { date: 'asc' },
+        take: limite,
+      }),
     ]);
 
-    const dates = [
-      ...articles.map((a) => a.modifieLe.getTime()),
-      ...clients.map((t) => t.modifieLe.getTime()),
-      ...promotions.map((p) => p.modifieLe.getTime()),
-      ...utilisateurs.map((u) => u.modifieLe.getTime()),
-      ...tombstones.map((t) => t.date.getTime()),
-    ];
-    const derniereDate = dates.length > 0 ? Math.max(...dates) : curseur.date;
-    const dernierId =
-      articles.length > 0 ? articles[articles.length - 1].id : curseur.id;
+    const suivant: Curseur = {
+      v: 2,
+      articles: positionApres(articles, curseur.articles),
+      clients: positionApres(clients, curseur.clients),
+      promotions: positionApres(promotions, curseur.promotions),
+      utilisateurs: positionApres(utilisateurs, curseur.utilisateurs),
+      tombstones:
+        tombstones.length > 0
+          ? tombstones[tombstones.length - 1].date.getTime()
+          : curseur.tombstones,
+    };
 
+    // Une page pleine signale qu'il en reste, pour chaque entite
+    // independamment : la caisse rappelle tant que c'est vrai.
     const autresPages =
       articles.length === limite ||
       clients.length === limite ||
       promotions.length === limite ||
-      utilisateurs.length === limite;
+      utilisateurs.length === limite ||
+      tombstones.length === limite;
 
     const parEntite = (entite: string) =>
       tombstones.filter((t) => t.entite === entite).map((t) => t.entiteId);
 
     const reponse: ReponseDescente = {
       versionProtocole: VERSION_PROTOCOLE_SYNC,
-      curseur: ecrireCurseur({ date: derniereDate, id: dernierId }),
+      curseur: ecrireCurseur(suivant),
       autresPages,
       horodatageServeur: new Date().toISOString(),
       articles: articles.map((a) => this.versArticleSync(a, caisse.magasinId)),
@@ -194,21 +271,18 @@ export class SyncService {
     return reponse;
   }
 
-  private async articlesModifies(
-    depuis: Date,
-    dernierId: string,
-    limite: number,
-    magasinId: string,
-  ) {
+  /**
+   * Articles modifies depuis la position donnee.
+   *
+   * Un seul critere suffit : la date de modification de la fiche. Les
+   * declencheurs installes sur PrixArticle et CodeBarre la remontent des
+   * qu'un prix ou un code bouge, ce qui evite une condition « OR » sur les
+   * tables liees — condition qui, elle, ne pouvait pas etre parcourue par
+   * curseur et laissait donc passer des changements de prix.
+   */
+  private async articlesModifies(position: Position, limite: number, magasinId: string) {
     return this.prisma.article.findMany({
-      where: {
-        OR: [
-          { modifieLe: { gt: depuis } },
-          { modifieLe: depuis, id: { gt: dernierId } },
-          { prix: { some: { modifieLe: { gte: depuis } } } },
-          { codesBarres: { some: { creeLe: { gte: depuis } } } },
-        ],
-      },
+      where: apres(position),
       orderBy: [{ modifieLe: 'asc' }, { id: 'asc' }],
       take: limite,
       include: {

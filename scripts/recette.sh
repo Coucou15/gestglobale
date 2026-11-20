@@ -49,22 +49,30 @@ base_fraiche() {
   exit 1
 }
 
-couleur '1/5  Construction'
+couleur '1/6  Construction'
 ( cd "$RACINE/packages/shared" && pnpm build >/dev/null )
 ( cd "$API" && npx prisma generate >/dev/null && npx nest build >/dev/null )
 
-couleur '2/5  Noyau metier (hors base, hors reseau)'
+couleur '2/6  Noyau metier (hors base, hors reseau)'
 ( cd "$RACINE/packages/shared" && npx vitest run )
 
-couleur "3/5  Nettoyage a l'import de l'export de l'ancien logiciel"
+couleur "3/6  Nettoyage a l'import de l'export de l'ancien logiciel"
 ( cd "$API" && npx vitest run )
 
-couleur '4/5  Recette fonctionnelle du lot 1 (API + PostgreSQL)'
+couleur '4/6  Recette fonctionnelle du lot 1 (API + PostgreSQL)'
 base_fraiche
 ( cd "$API" && node test/recette-lot1.mjs )
 
-couleur '5/5  Coupure reseau de la caisse (SQLite local + API)'
+couleur '5/6  Coupure reseau de la caisse (SQLite local + API)'
 base_fraiche
 ( cd "$POS" && npx vitest run )
 
-couleur 'Recette du lot 1 terminee.'
+if [[ "${AVEC_CHARGE:-0}" == "1" ]]; then
+  couleur '6/6  Test de charge au volume reel'
+  base_fraiche
+  ( cd "$API" && npx ts-node -T prisma/seed-volume.ts )
+  ( cd "$POS" && node test/charge.mjs )
+  ( cd "$POS" && node test/concurrence.mjs )
+fi
+
+couleur 'Recette terminee.'
