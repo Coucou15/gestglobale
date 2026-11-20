@@ -1605,5 +1605,18 @@ model Parametre {
 
   magasin Magasin? @relation(fields: [magasinId], references: [id])
 
+  // PostgreSQL considere deux NULL comme distincts : l'unicite du couple
+  // ne protegerait donc pas les parametres globaux (magasinId nul).
+  // La migration ajoute deux index partiels qui couvrent les deux cas.
   @@unique([cle, magasinId])
+}
+
+/// Compteurs de numerotation des documents nes au back-office.
+/// Table dediee plutot que Parametre : une cle unique non nulle garantit
+/// l'absence de doublon, ce qu'un index unique sur une colonne nullable
+/// ne ferait pas sous PostgreSQL.
+model Compteur {
+  cle       String   @id
+  valeur    Int      @default(0)
+  modifieLe DateTime @updatedAt
 }
