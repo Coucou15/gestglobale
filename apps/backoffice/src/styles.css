@@ -1,0 +1,115 @@
+/*
+ * Back-office : utilisable au bureau, sur tablette et sur smartphone
+ * sans installation (section 5). La mise en page bascule en colonne sous
+ * 900 px et le menu passe en barre inferieure sur telephone.
+ */
+:root {
+  --fond: #0f1319;
+  --surface: #171d26;
+  --surface-haute: #1f2733;
+  --bord: #2a3442;
+  --texte: #eef2f7;
+  --texte-doux: #93a1b5;
+  --accent: #2f81f7;
+  --vert: #2ea043;
+  --orange: #d29922;
+  --rouge: #da3633;
+  --rayon: 10px;
+}
+
+* { box-sizing: border-box; }
+html, body, #racine { height: 100%; }
+body {
+  margin: 0;
+  background: var(--fond);
+  color: var(--texte);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+a { color: var(--accent); text-decoration: none; }
+
+button, .bouton {
+  font: inherit; color: inherit; background: var(--surface-haute);
+  border: 1px solid var(--bord); border-radius: var(--rayon);
+  padding: 10px 16px; min-height: 44px; cursor: pointer;
+}
+button:hover { background: #28313f; }
+button.principal { background: var(--accent); border-color: var(--accent); font-weight: 600; }
+button:disabled { opacity: .5; cursor: not-allowed; }
+
+input, select {
+  font: inherit; color: inherit; background: var(--fond);
+  border: 1px solid var(--bord); border-radius: var(--rayon);
+  padding: 10px 12px; min-height: 44px; width: 100%;
+}
+input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+.application { display: grid; grid-template-columns: 240px 1fr; height: 100%; }
+.menu {
+  background: var(--surface); border-right: 1px solid var(--bord);
+  display: flex; flex-direction: column; padding: 16px; gap: 4px; overflow-y: auto;
+}
+.menu .marque { font-weight: 700; font-size: 18px; padding: 8px; margin-bottom: 8px; }
+.menu a {
+  color: var(--texte-doux); padding: 12px; border-radius: var(--rayon);
+  display: block; min-height: 44px;
+}
+.menu a.actif { background: var(--surface-haute); color: var(--texte); font-weight: 600; }
+.menu .bas { margin-top: auto; }
+
+.contenu { overflow-y: auto; padding: 24px; }
+.entete-page { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
+.entete-page h1 { margin: 0; font-size: 22px; }
+.entete-page .espace { flex: 1; }
+
+.cartes { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+.carte {
+  background: var(--surface); border: 1px solid var(--bord);
+  border-radius: 12px; padding: 18px;
+}
+.carte .intitule { color: var(--texte-doux); font-size: 13px; margin-bottom: 8px; }
+.carte .valeur { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.carte .detail { color: var(--texte-doux); font-size: 13px; margin-top: 6px; }
+
+.tableau { background: var(--surface); border: 1px solid var(--bord);
+  border-radius: 12px; overflow: hidden; }
+table { width: 100%; border-collapse: collapse; }
+th {
+  text-align: left; padding: 12px; font-size: 13px; color: var(--texte-doux);
+  background: var(--surface-haute); border-bottom: 1px solid var(--bord); white-space: nowrap;
+}
+td { padding: 12px; border-bottom: 1px solid var(--bord); }
+tr:last-child td { border-bottom: none; }
+td.nombre, th.nombre { text-align: right; font-variant-numeric: tabular-nums; }
+
+.etiquette { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 12px; }
+.etiquette.vert { background: rgba(46,160,67,.18); color: #7ee787; }
+.etiquette.orange { background: rgba(210,153,34,.18); color: #e3b341; }
+.etiquette.rouge { background: rgba(218,54,51,.18); color: #ff7b72; }
+.etiquette.neutre { background: var(--surface-haute); color: var(--texte-doux); }
+
+.message { padding: 12px 16px; border-radius: var(--rayon); margin: 12px 0; }
+.message.erreur { background: rgba(218,54,51,.14); border: 1px solid var(--rouge); }
+.message.info { background: rgba(47,129,247,.12); border: 1px solid var(--accent); }
+
+.barre-outils { display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+.barre-outils input, .barre-outils select { width: auto; min-width: 200px; flex: 1; }
+.discret { color: var(--texte-doux); font-size: 14px; }
+.centre { display: flex; align-items: center; justify-content: center; height: 100%; padding: 24px; }
+.carte-connexion { background: var(--surface); border: 1px solid var(--bord);
+  border-radius: 14px; padding: 32px; width: min(420px, 100%); }
+.champ { margin-bottom: 14px; }
+.champ label { display: block; margin-bottom: 6px; font-size: 14px; color: var(--texte-doux); }
+
+@media (max-width: 900px) {
+  .application { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
+  .menu {
+    grid-row: 2; flex-direction: row; border-right: none;
+    border-top: 1px solid var(--bord); overflow-x: auto; padding: 8px;
+    padding-bottom: calc(8px + env(safe-area-inset-bottom));
+  }
+  .menu .marque, .menu .bas { display: none; }
+  .menu a { white-space: nowrap; font-size: 14px; padding: 10px 14px; }
+  .contenu { grid-row: 1; padding: 16px; }
+  .tableau { overflow-x: auto; }
+  table { min-width: 560px; }
+}

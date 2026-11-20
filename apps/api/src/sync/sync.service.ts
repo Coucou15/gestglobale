@@ -474,6 +474,9 @@ export class SyncService {
         sessionOuverte: caisse.sessions[0] ?? null,
         derniereDescenteLe: caisse.curseurSync?.derniereDescenteLe ?? null,
         derniereRemonteeLe: derniere,
+        // Une caisse installee mais jamais synchronisee n'est pas « en
+        // retard de 24 h » : elle n'a simplement jamais parle au serveur.
+        jamaisSynchronisee: derniere === null,
         couleur: heures > 24 ? 'rouge' : heures > 0.25 ? 'orange' : 'vert',
       };
     });
