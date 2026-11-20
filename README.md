@@ -211,6 +211,12 @@ Nettoyage applique automatiquement (section 7), verifie par 23 tests :
 - articles a stock nul archives, **jamais supprimes** ;
 - stocks negatifs signales pour inventaire avant bascule.
 
+L'assistant reconnait le format par le contenu et non par l'extension :
+un classeur `.xlsx` ou un fichier texte sont lus directement, tandis qu'un
+vrai `.xls` binaire, un tableau HTML renomme `.xls` ou du XML Excel 2003
+donnent une consigne de conversion claire au lieu d'une erreur technique.
+Voir [`docs/transmettre-lexport.md`](docs/transmettre-lexport.md).
+
 Deroule :
 
 1. `POST /api/v1/import/analyse` — import a blanc, n'ecrit rien, rend le

@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import ExcelJS from 'exceljs';
 import { ImportService } from '../src/import/import.service';
-import { normaliserIntitule, nombre, dateOuNull, celluleEnTexte } from '../src/import/lecture';
+import {
+  normaliserIntitule, nombre, dateOuNull, celluleEnTexte, detecterFormat, lireTampon,
+} from '../src/import/lecture';
 
 /**
  * Nettoyage automatique pendant l'import (section 7).
@@ -251,5 +253,60 @@ describe('Import a blanc du classeur de l’ancien logiciel', () => {
     expect(avertissements.length).toBeGreaterThan(0);
     // Une unite aberrante ne doit jamais empecher la bascule.
     expect(erreurs.some((a) => a.code === 'UNITE_ABERRANTE')).toBe(false);
+  });
+});
+
+describe('Reconnaissance du format reel du fichier', () => {
+  const entete = (...octets: number[]) => Buffer.from([...octets, ...Array(16).fill(0x41)]);
+
+  it('reconnait un classeur .xlsx moderne', () => {
+    expect(detecterFormat(entete(0x50, 0x4b, 0x03, 0x04))).toBe('XLSX');
+  });
+
+  it('reconnait un vrai .xls binaire', () => {
+    expect(detecterFormat(entete(0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1)))
+      .toBe('XLS_BIFF');
+  });
+
+  it('demasque un tableau HTML nomme .xls', () => {
+    const html = Buffer.from(
+      '<html><head><meta charset="utf-8"></head><body><table><tr><td>A</td></tr></table></body></html>',
+      'utf8',
+    );
+    expect(detecterFormat(html)).toBe('HTML');
+  });
+
+  it('reconnait le XML Excel 2003', () => {
+    const xml = Buffer.from(
+      '<?xml version="1.0"?>\n<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet">',
+      'utf8',
+    );
+    expect(detecterFormat(xml)).toBe('SPREADSHEETML');
+  });
+
+  it('reconnait un fichier texte a separateurs', () => {
+    expect(detecterFormat(Buffer.from('REFERENCE;DESIGNATION;PRIX\nART001;Huile;750\n', 'utf8')))
+      .toBe('TEXTE');
+  });
+
+  it('explique quoi faire plutot que d’echouer sechement', async () => {
+    const biff = entete(0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1);
+    await expect(lireTampon(biff)).rejects.toThrow(/Enregistrer sous/);
+    await expect(lireTampon(biff)).rejects.toThrow(/binaire \.xls/);
+  });
+
+  it('lit un export CSV comme un classeur a un onglet', async () => {
+    const csv = Buffer.from(
+      'REFERENCE;DESIGNATION;UNITE;PRIX DETAIL;CUMP\n' +
+      'ART001;Huile de table 5 L;U;750;620\n' +
+      'ART002;Semoule 10 kg;U;950;810\n' +
+      'NOMBRE ITEMS;2;;;\n',
+      'utf8',
+    );
+    const onglets = await lireTampon(csv);
+    expect(onglets).toHaveLength(1);
+    expect(onglets[0].lignes).toHaveLength(2);
+    expect(onglets[0].lignesIgnorees).toBe(1);
+    expect(onglets[0].lignes[0].valeurs.reference).toBe('ART001');
   });
 });

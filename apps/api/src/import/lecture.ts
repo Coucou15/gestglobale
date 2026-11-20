@@ -67,17 +67,147 @@ function ligneDeTotal(valeurs: Record<string, string>): boolean {
   );
 }
 
+/**
+ * Formats qu'un fichier nomme « .xls » peut reellement cacher.
+ *
+ * L'extension ne dit rien : beaucoup de logiciels de gestion anciens
+ * ecrivent un tableau HTML ou un texte tabule et le nomment « .xls »,
+ * parce qu'Excel les ouvre quand meme. Un vrai .xls, lui, est un fichier
+ * composite OLE2 des annees 1990.
+ */
+export type FormatClasseur =
+  | 'XLSX'            // ZIP OpenXML, le format moderne
+  | 'XLS_BIFF'        // vrai .xls binaire (OLE2)
+  | 'HTML'            // tableau HTML renomme en .xls
+  | 'SPREADSHEETML'   // XML Excel 2003
+  | 'TEXTE'           // CSV ou texte tabule
+  | 'INCONNU';
+
+/** Reconnait le format par le contenu, jamais par l'extension. */
+export function detecterFormat(tampon: Buffer): FormatClasseur {
+  if (tampon.length < 8) return 'INCONNU';
+
+  // ZIP : "PK\x03\x04"
+  if (tampon[0] === 0x50 && tampon[1] === 0x4b && tampon[2] === 0x03 && tampon[3] === 0x04) {
+    return 'XLSX';
+  }
+  // OLE2 : D0 CF 11 E0 A1 B1 1A E1
+  if (
+    tampon[0] === 0xd0 && tampon[1] === 0xcf && tampon[2] === 0x11 && tampon[3] === 0xe0 &&
+    tampon[4] === 0xa1 && tampon[5] === 0xb1 && tampon[6] === 0x1a && tampon[7] === 0xe1
+  ) {
+    return 'XLS_BIFF';
+  }
+
+  const debut = tampon.subarray(0, 4096).toString('utf8').replace(/^\uFEFF/, '').trimStart();
+  const minuscules = debut.toLowerCase();
+
+  if (minuscules.startsWith('<?xml')) {
+    return /urn:schemas-microsoft-com:office:spreadsheet|<workbook/i.test(debut)
+      ? 'SPREADSHEETML'
+      : 'INCONNU';
+  }
+  if (
+    minuscules.startsWith('<html') ||
+    minuscules.startsWith('<!doctype html') ||
+    minuscules.startsWith('<table') ||
+    minuscules.startsWith('<meta')
+  ) {
+    return 'HTML';
+  }
+  // Du texte imprimable avec des separateurs de colonnes.
+  if (/^[\x09\x0a\x0d\x20-\x7e\u00a0-\uffff]+$/.test(debut) && /[;,\t]/.test(debut)) {
+    return 'TEXTE';
+  }
+  return 'INCONNU';
+}
+
+/** Erreur portant un message directement utilisable par le gerant. */
+export class FormatNonGere extends Error {
+  constructor(
+    public readonly format: FormatClasseur,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'FormatNonGere';
+  }
+}
+
+const CONVERSION =
+  'Ouvrez-le dans Excel ou LibreOffice, puis « Enregistrer sous » en ' +
+  '« Classeur Excel (.xlsx) », et relancez l\u2019import. La conversion ne se ' +
+  'fait qu\u2019une fois, a la bascule.';
+
 export async function lireClasseur(chemin: string): Promise<OngletLu[]> {
-  const classeur = new ExcelJS.Workbook();
-  await classeur.xlsx.readFile(chemin);
-  return lireClasseurCharge(classeur);
+  const { readFile } = await import('node:fs/promises');
+  return lireTampon(await readFile(chemin));
 }
 
 export async function lireTampon(tampon: Buffer): Promise<OngletLu[]> {
-  const classeur = new ExcelJS.Workbook();
-  // ExcelJS attend un ArrayBuffer ; on evite une copie inutile.
-  await classeur.xlsx.load(tampon as unknown as ArrayBuffer);
-  return lireClasseurCharge(classeur);
+  const format = detecterFormat(tampon);
+
+  switch (format) {
+    case 'XLSX': {
+      const classeur = new ExcelJS.Workbook();
+      // ExcelJS attend un ArrayBuffer ; on evite une copie inutile.
+      await classeur.xlsx.load(tampon as unknown as ArrayBuffer);
+      return lireClasseurCharge(classeur);
+    }
+
+    case 'TEXTE': {
+      // Un export en un seul tableau : CSV ou texte tabule. On le traite
+      // comme un classeur a un onglet, nomme d'apres son contenu.
+      const classeur = new ExcelJS.Workbook();
+      const { Readable } = await import('node:stream');
+      const flux = Readable.from([tampon]);
+      const feuille = await classeur.csv.read(flux, {
+        parserOptions: { delimiter: devinerSeparateur(tampon) },
+      });
+      feuille.name = feuille.name || 'DONNEES';
+      return lireClasseurCharge(classeur);
+    }
+
+    case 'XLS_BIFF':
+      throw new FormatNonGere(
+        format,
+        `Ce fichier est un classeur Excel ancien (format binaire .xls d\u2019avant 2007). ` +
+          CONVERSION,
+      );
+
+    case 'HTML':
+      throw new FormatNonGere(
+        format,
+        `Ce fichier porte l\u2019extension .xls mais contient en realite un tableau HTML : ` +
+          `c\u2019est ainsi que beaucoup de logiciels anciens « exportent vers Excel ». ` +
+          CONVERSION,
+      );
+
+    case 'SPREADSHEETML':
+      throw new FormatNonGere(
+        format,
+        `Ce fichier est au format XML Excel 2003, et non un classeur .xlsx. ` + CONVERSION,
+      );
+
+    default:
+      throw new FormatNonGere(
+        format,
+        `Format de fichier non reconnu. L\u2019assistant attend un classeur Excel ` +
+          `(.xlsx) ou un fichier texte (.csv). ` + CONVERSION,
+      );
+  }
+}
+
+/** Devine le separateur d'un fichier texte : point-virgule, virgule ou tabulation. */
+function devinerSeparateur(tampon: Buffer): string {
+  const echantillon = tampon.subarray(0, 8192).toString('utf8');
+  const premiereLigne = echantillon.split(/\r?\n/)[0] ?? '';
+  const comptes: Array<[string, number]> = [
+    [';', (premiereLigne.match(/;/g) ?? []).length],
+    ['\t', (premiereLigne.match(/\t/g) ?? []).length],
+    [',', (premiereLigne.match(/,/g) ?? []).length],
+  ];
+  comptes.sort((a, b) => b[1] - a[1]);
+  return comptes[0][1] > 0 ? comptes[0][0] : ';';
 }
 
 function lireClasseurCharge(classeur: ExcelJS.Workbook): OngletLu[] {

@@ -6,6 +6,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags } from '@nestjs/swagger';
 import { GraviteAnomalie, TypeImport } from '@prisma/client';
 import { ImportService } from './import.service';
+import { FormatNonGere } from './lecture';
 import { Droits, Utilisateur, type UtilisateurConnecte } from '../auth/droits.decorator';
 import { PERMISSIONS } from '@gestglobale/shared';
 import { IsBoolean, IsOptional, IsString } from 'class-validator';
@@ -38,7 +39,9 @@ export class ImportController {
   ) {
     if (!fichier) throw new BadRequestException('Aucun fichier recu');
 
-    const { resultat } = await this.importation.analyser(fichier.buffer);
+    const { resultat } = await this.traduireFormat(() =>
+      this.importation.analyser(fichier.buffer),
+    );
     const session = await this.importation.enregistrerSession({
       nomFichier: fichier.originalname,
       type: TypeImport.BLANC,
@@ -77,15 +80,34 @@ export class ImportController {
     @Utilisateur() utilisateur: UtilisateurConnecte,
   ) {
     if (!fichier) throw new BadRequestException('Aucun fichier recu');
-    return this.importation.executer({
-      tampon: fichier.buffer,
-      nomFichier: fichier.originalname,
-      magasinId: dto.magasinId,
-      emplacementDepotId: dto.emplacementDepotId,
-      emplacementVenteId: dto.emplacementVenteId,
-      utilisateurId: utilisateur.id,
-      forcer: dto.forcer === true || String(dto.forcer) === 'true',
-    });
+    // Le classeur n'est lu qu'une fois : traduire un format non gere ne
+    // justifie pas de l'analyser deux fois, sur 28 000 lignes.
+    return this.traduireFormat(() =>
+      this.importation.executer({
+        tampon: fichier.buffer,
+        nomFichier: fichier.originalname,
+        magasinId: dto.magasinId,
+        emplacementDepotId: dto.emplacementDepotId,
+        emplacementVenteId: dto.emplacementVenteId,
+        utilisateurId: utilisateur.id,
+        forcer: dto.forcer === true || String(dto.forcer) === 'true',
+      }),
+    );
+  }
+
+  /**
+   * Traduit un format de fichier non gere en consigne directement lisible
+   * par le gerant, plutot qu'en erreur technique.
+   */
+  private async traduireFormat<T>(action: () => Promise<T>): Promise<T> {
+    try {
+      return await action();
+    } catch (erreur) {
+      if (erreur instanceof FormatNonGere) {
+        throw new BadRequestException(erreur.message);
+      }
+      throw erreur;
+    }
   }
 
   @Get('sessions')
