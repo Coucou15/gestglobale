@@ -49,18 +49,21 @@ base_fraiche() {
   exit 1
 }
 
-couleur '1/4  Construction'
+couleur '1/5  Construction'
 ( cd "$RACINE/packages/shared" && pnpm build >/dev/null )
 ( cd "$API" && npx prisma generate >/dev/null && npx nest build >/dev/null )
 
-couleur '2/4  Noyau metier (hors base, hors reseau)'
+couleur '2/5  Noyau metier (hors base, hors reseau)'
 ( cd "$RACINE/packages/shared" && npx vitest run )
 
-couleur '3/4  Recette fonctionnelle du lot 1 (API + PostgreSQL)'
+couleur '3/5  Nettoyage a l'import de l'export de l'ancien logiciel'
+( cd "$API" && npx vitest run )
+
+couleur '4/5  Recette fonctionnelle du lot 1 (API + PostgreSQL)'
 base_fraiche
 ( cd "$API" && node test/recette-lot1.mjs )
 
-couleur '4/4  Coupure reseau de la caisse (SQLite local + API)'
+couleur '5/5  Coupure reseau de la caisse (SQLite local + API)'
 base_fraiche
 ( cd "$POS" && npx vitest run )
 
