@@ -1,0 +1,1609 @@
+// =====================================================================
+//  GestGlobale — schema de donnees (PostgreSQL)
+//
+//  Conventions non negociables du projet :
+//   * tout montant est un entier de CENTIMES de dinar (suffixe ...Centimes).
+//     Aucun flottant ne touche un montant, nulle part.
+//   * toute quantite est un entier de MILLI-unites (suffixe ...Milli),
+//     ce qui permet 0,250 KG sans derive.
+//   * les tables historiques (mouvements, audit, lignes de ticket) ne sont
+//     jamais mises a jour : on ajoute une contre-ecriture.
+// =====================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------
+// 1. Organisation : societe, magasins, emplacements de stock
+// ---------------------------------------------------------------------
+
+model Societe {
+  id                String   @id @default(uuid())
+  raisonSociale     String
+  adresse           String?
+  telephone         String?
+  email             String?
+  rc                String?
+  nif               String?
+  nis               String?
+  articleImposition String?
+  logoUrl           String?
+  creeLe            DateTime @default(now())
+  modifieLe         DateTime @updatedAt
+
+  magasins Magasin[]
+}
+
+/// Une superette (M11 : le catalogue est central, les stocks sont par magasin).
+model Magasin {
+  id                String   @id @default(uuid())
+  societeId         String
+  code              String   @unique
+  nom               String
+  adresse           String?
+  telephone         String?
+  rc                String?
+  nif               String?
+  nis               String?
+  articleImposition String?
+  estSiege          Boolean  @default(false)
+  actif             Boolean  @default(true)
+  creeLe            DateTime @default(now())
+  modifieLe         DateTime @updatedAt
+
+  societe             Societe               @relation(fields: [societeId], references: [id])
+  emplacements        Emplacement[]
+  caisses             Caisse[]
+  prix                PrixArticle[]
+  historiquePrix      HistoriquePrix[]
+  comptes             CompteTresorerie[]
+  documentsVente      DocumentVente[]
+  commandes           CommandeFournisseur[]
+  utilisateurs        UtilisateurMagasin[]
+  parametres          Parametre[]
+  employes            Employe[]
+  tiersInternes       Tiers[]
+  receptions          Reception[]
+  plannings           Planning[]
+
+  @@index([societeId])
+}
+
+enum TypeEmplacement {
+  DEPOT           // MC dans l'ancien logiciel
+  SURFACE_VENTE   // SV dans l'ancien logiciel
+  RESERVE
+}
+
+/// Lieu physique ou le stock est compte. L'ancien logiciel n'en connaissait
+/// que deux (MC et SV) ; GestGlobale en accepte autant que necessaire.
+model Emplacement {
+  id        String          @id @default(uuid())
+  magasinId String
+  code      String
+  nom       String
+  type      TypeEmplacement
+  /// Emplacement alimente par defaut lors d'une reception fournisseur.
+  parDefautReception Boolean @default(false)
+  /// Emplacement ou la caisse decremente le stock a la vente.
+  parDefautVente     Boolean @default(false)
+  actif     Boolean         @default(true)
+  creeLe    DateTime        @default(now())
+  modifieLe DateTime        @updatedAt
+
+  magasin          Magasin            @relation(fields: [magasinId], references: [id])
+  stocks           Stock[]
+  mouvements       MouvementStock[]
+  inventaires      Inventaire[]
+  lots             Lot[]
+  receptions       Reception[]
+
+  @@unique([magasinId, code])
+  @@index([magasinId])
+}
+
+// ---------------------------------------------------------------------
+// 2. M1 — Articles
+// ---------------------------------------------------------------------
+
+model Rayon {
+  id        String   @id @default(uuid())
+  code      String   @unique
+  nom       String
+  nomAr     String?
+  ordre     Int      @default(0)
+  actif     Boolean  @default(true)
+  creeLe    DateTime @default(now())
+  modifieLe DateTime @updatedAt
+
+  familles Famille[]
+  articles Article[]
+}
+
+model Famille {
+  id        String   @id @default(uuid())
+  rayonId   String?
+  code      String   @unique
+  nom       String
+  nomAr     String?
+  /// Les familles de frais exigent un suivi de lot et de peremption (M2).
+  suiviPeremption Boolean @default(false)
+  joursAlertePeremption Int @default(0)
+  actif     Boolean  @default(true)
+  creeLe    DateTime @default(now())
+  modifieLe DateTime @updatedAt
+
+  rayon      Rayon?      @relation(fields: [rayonId], references: [id])
+  articles   Article[]
+  promotions Promotion[]
+
+  @@index([rayonId])
+}
+
+model Gamme {
+  id       String    @id @default(uuid())
+  code     String    @unique
+  nom      String
+  articles Article[]
+}
+
+model Marque {
+  id       String    @id @default(uuid())
+  code     String    @unique
+  nom      String
+  articles Article[]
+}
+
+enum TypeArticle {
+  PRODUIT
+  PACK
+  CARTE_CADEAU
+  SERVICE
+}
+
+enum UniteMesure {
+  UN
+  KG
+  L
+  M
+}
+
+model Article {
+  id             String      @id @default(uuid())
+  reference      String      @unique
+  designation    String
+  designationAr  String?
+  type           TypeArticle @default(PRODUIT)
+  unite          UniteMesure @default(UN)
+  /// Decimales autorisees a la saisie (0 pour UN, 3 pour KG).
+  decimales      Int         @default(0)
+  rayonId        String?
+  familleId      String?
+  gammeId        String?
+  marqueId       String?
+  photoUrl       String?
+  tauxTva        Int         @default(0)
+
+  /// Pack : article de base et nombre d'unites decrementees du stock.
+  packDeId       String?
+  packNbUnites   Int?
+
+  /// Vrac vendu au poids via une balance.
+  estVrac        Boolean     @default(false)
+
+  /// Valorisation : cout moyen pondere et dernier prix d'achat connus.
+  cumpCentimes          BigInt @default(0)
+  dernierPrixAchatCentimes BigInt @default(0)
+
+  gestionLot            Boolean @default(false)
+  joursAlertePeremption Int     @default(0)
+  poidsUnitaireGrammes  Int?
+
+  venteAutorisee Boolean  @default(true)
+  /// Un article archive reste consultable et historise mais ne se vend plus.
+  /// 24 545 produits de l'export ont un stock a 0 et sont candidats a l'archivage.
+  archive        Boolean  @default(false)
+  /// Origine de la fiche, pour tracer la bascule depuis l'ancien logiciel.
+  importeDepuis  String?
+  creeLe         DateTime @default(now())
+  modifieLe      DateTime @updatedAt
+
+  rayon    Rayon?   @relation(fields: [rayonId], references: [id])
+  famille  Famille? @relation(fields: [familleId], references: [id])
+  gamme    Gamme?   @relation(fields: [gammeId], references: [id])
+  marque   Marque?  @relation(fields: [marqueId], references: [id])
+  packDe   Article? @relation("PackDeBase", fields: [packDeId], references: [id])
+  packs    Article[] @relation("PackDeBase")
+
+  codesBarres       CodeBarre[]
+  codesVrac         CodeVrac[]
+  prix              PrixArticle[]
+  historiquePrix    HistoriquePrix[]
+  stocks            Stock[]
+  mouvements        MouvementStock[]
+  lots              Lot[]
+  lignesInventaire  LigneInventaire[]
+  lignesCommande    LigneCommande[]
+  lignesReception   LigneReception[]
+  lignesVente       LigneVente[]
+  promotions        Promotion[]
+
+  @@index([familleId])
+  @@index([rayonId])
+  @@index([archive, venteAutorisee])
+  @@index([designation])
+}
+
+enum TypeCodeBarre {
+  EAN13
+  EAN8
+  INTERNE
+  GENERIQUE   // les 21 198 codes secondaires de l'ancien logiciel
+}
+
+/// Un article peut porter plusieurs codes ; un code n'appartient qu'a un
+/// article (contrainte d'unicite sur tout le catalogue, section M1).
+model CodeBarre {
+  id        String        @id @default(uuid())
+  articleId String
+  code      String        @unique
+  type      TypeCodeBarre @default(EAN13)
+  principal Boolean       @default(false)
+  creeLe    DateTime      @default(now())
+
+  article Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  @@index([articleId])
+}
+
+/// Code vrac/balance : un code court saisi par le caissier ou imprime par
+/// la balance, rattache a un article vendu au poids ou a prix variable.
+model CodeVrac {
+  id         String   @id @default(uuid())
+  articleId  String
+  code       String   @unique
+  nom        String
+  /// POIDS ou PRIX incorpore dans l'etiquette balance.
+  typeValeur String   @default("POIDS")
+  creeLe     DateTime @default(now())
+
+  article Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  @@index([articleId])
+}
+
+enum CategoriePrix {
+  DETAIL
+  GROS
+  CAT3
+  CAT4
+  CAT5
+  PACK
+}
+
+/// Prix par categorie. magasinId nul = prix du siege, applique partout ;
+/// une ligne avec magasinId le surcharge pour ce magasin (M11).
+model PrixArticle {
+  id            String        @id @default(uuid())
+  articleId     String
+  magasinId     String?
+  categorie     CategoriePrix
+  prixCentimes  BigInt
+  actifDepuis   DateTime      @default(now())
+  creeLe        DateTime      @default(now())
+  modifieLe     DateTime      @updatedAt
+
+  article Article  @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  magasin Magasin? @relation(fields: [magasinId], references: [id])
+
+  @@unique([articleId, magasinId, categorie])
+  @@index([articleId])
+}
+
+/// Historique de tous les changements de prix : qui, quand, ancien, nouveau.
+model HistoriquePrix {
+  id                  String        @id @default(uuid())
+  articleId           String
+  magasinId           String?
+  categorie           CategoriePrix
+  ancienPrixCentimes  BigInt
+  nouveauPrixCentimes BigInt
+  motif               String?
+  /// Renseigne quand le changement vient d'une modification en masse.
+  lotModificationId   String?
+  utilisateurId       String
+  date                DateTime      @default(now())
+
+  article     Article      @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  magasin     Magasin?     @relation(fields: [magasinId], references: [id])
+  utilisateur Utilisateur  @relation(fields: [utilisateurId], references: [id])
+
+  @@index([articleId, date])
+  @@index([date])
+}
+
+// ---------------------------------------------------------------------
+// 3. M2 — Stocks, mouvements, lots, inventaires
+// ---------------------------------------------------------------------
+
+/// Stock d'un article a un emplacement. Une seule ligne par couple :
+/// c'est la verite comptable, toujours egale a la somme des mouvements.
+model Stock {
+  id              String   @id @default(uuid())
+  articleId       String
+  emplacementId   String
+  quantiteMilli   Int      @default(0)
+  /// Seuil d'alerte de reassort. L'export contient des seuils negatifs (-3)
+  /// qui sont remis a 0 a l'import (section 7, nettoyage automatique).
+  seuilAlerteMilli Int     @default(0)
+  capaciteMilli    Int?
+  derniereEntree   DateTime?
+  derniereSortie   DateTime?
+  modifieLe        DateTime @updatedAt
+
+  article     Article     @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  emplacement Emplacement @relation(fields: [emplacementId], references: [id])
+
+  @@unique([articleId, emplacementId])
+  @@index([emplacementId])
+}
+
+enum TypeMouvement {
+  RECEPTION
+  RETOUR_FOURNISSEUR
+  VENTE
+  RETOUR_CLIENT
+  TRANSFERT_SORTIE
+  TRANSFERT_ENTREE
+  CASSE
+  PEREMPTION
+  CONSOMMATION_INTERNE
+  AJUSTEMENT_INVENTAIRE
+  SOLDE_INITIAL
+}
+
+/// Journal des mouvements : jamais modifie, jamais supprime.
+/// Chaque ligne garde son utilisateur, son heure, sa caisse et son document
+/// d'origine (exigence M2).
+model MouvementStock {
+  id              String        @id @default(uuid())
+  numero          String        @unique
+  type            TypeMouvement
+  articleId       String
+  emplacementId   String
+  /// Signee : positive pour une entree, negative pour une sortie.
+  quantiteMilli   Int
+  /// Stock a l'emplacement apres application du mouvement.
+  stockApresMilli Int
+  /// CUMP au moment du mouvement : fige la valorisation historique.
+  cumpCentimes    BigInt        @default(0)
+  valeurCentimes  BigInt        @default(0)
+  lotId           String?
+  documentType    String?
+  documentId      String?
+  documentNumero  String?
+  motif           String?
+  utilisateurId   String
+  caisseId        String?
+  date            DateTime      @default(now())
+  creeLe          DateTime      @default(now())
+
+  article     Article     @relation(fields: [articleId], references: [id])
+  emplacement Emplacement @relation(fields: [emplacementId], references: [id])
+  lot         Lot?        @relation(fields: [lotId], references: [id])
+  utilisateur Utilisateur @relation(fields: [utilisateurId], references: [id])
+  caisse      Caisse?     @relation(fields: [caisseId], references: [id])
+
+  @@index([articleId, date])
+  @@index([emplacementId, date])
+  @@index([date])
+  @@index([documentNumero])
+}
+
+/// Lot et date de peremption, pour les familles de frais (M2).
+model Lot {
+  id             String   @id @default(uuid())
+  articleId      String
+  emplacementId  String
+  numero         String
+  datePeremption DateTime?
+  quantiteMilli  Int      @default(0)
+  receptionId    String?
+  creeLe         DateTime @default(now())
+  modifieLe      DateTime @updatedAt
+
+  article     Article          @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  emplacement Emplacement      @relation(fields: [emplacementId], references: [id])
+  mouvements  MouvementStock[]
+
+  @@unique([articleId, emplacementId, numero])
+  @@index([datePeremption])
+}
+
+enum TypeInventaire {
+  TOURNANT
+  COMPLET
+}
+
+enum StatutInventaire {
+  BROUILLON
+  EN_SAISIE
+  A_VALIDER
+  VALIDE
+  ANNULE
+}
+
+model Inventaire {
+  id                     String           @id @default(uuid())
+  numero                 String           @unique
+  emplacementId          String
+  type                   TypeInventaire
+  statut                 StatutInventaire @default(BROUILLON)
+  libelle                String?
+  /// Filtres de l'inventaire tournant (rayon, famille, fournisseur).
+  perimetre              Json?
+  debuteLe               DateTime         @default(now())
+  clotureLe              DateTime?
+  utilisateurSaisieId    String
+  /// Seul un responsable valide l'ecart (M2 et section 6).
+  utilisateurValidationId String?
+  ecartValoriseCentimes  BigInt           @default(0)
+  creeLe                 DateTime         @default(now())
+  modifieLe              DateTime         @updatedAt
+
+  emplacement         Emplacement       @relation(fields: [emplacementId], references: [id])
+  utilisateurSaisie   Utilisateur       @relation("InventaireSaisie", fields: [utilisateurSaisieId], references: [id])
+  utilisateurValidation Utilisateur?    @relation("InventaireValidation", fields: [utilisateurValidationId], references: [id])
+  lignes              LigneInventaire[]
+
+  @@index([emplacementId, statut])
+}
+
+model LigneInventaire {
+  id                     String   @id @default(uuid())
+  inventaireId           String
+  articleId              String
+  quantiteTheoriqueMilli Int
+  quantiteCompteeMilli   Int?
+  ecartMilli             Int      @default(0)
+  cumpCentimes           BigInt   @default(0)
+  ecartValoriseCentimes  BigInt   @default(0)
+  /// Trace du terminal mobile ayant scanne la ligne.
+  sourceSaisie           String?
+  compteeLe              DateTime?
+
+  inventaire Inventaire @relation(fields: [inventaireId], references: [id], onDelete: Cascade)
+  article    Article    @relation(fields: [articleId], references: [id])
+
+  @@unique([inventaireId, articleId])
+  @@index([inventaireId])
+}
+
+// ---------------------------------------------------------------------
+// 4. M6 — Tiers (clients et fournisseurs)
+// ---------------------------------------------------------------------
+
+enum TypeTiers {
+  CLIENT
+  FOURNISSEUR
+  LES_DEUX
+}
+
+enum TypeClient {
+  PARTICULIER
+  CARTE_FIDELITE
+  PROFESSIONNEL
+  INTERNE          // magasin ou depot preleve en interne
+}
+
+model Tiers {
+  id                String     @id @default(uuid())
+  code              String     @unique
+  type              TypeTiers
+  typeClient        TypeClient?
+  raisonSociale     String
+  adresse           String?
+  telephone         String?
+  telephone2        String?
+  email             String?
+  rc                String?
+  nif               String?
+  nis               String?
+  articleImposition String?
+  banque            String?
+  rib               String?
+
+  categoriePrix     CategoriePrix @default(DETAIL)
+  remisePourcent    Int           @default(0)
+  modePaiement      String?
+
+  /// Solde courant : positif = le tiers doit de l'argent au magasin.
+  soldeCentimes          BigInt  @default(0)
+  /// Solde repris de l'ancien logiciel a la bascule (section 7).
+  soldeOuvertureCentimes BigInt  @default(0)
+  plafondCreditCentimes  BigInt  @default(0)
+  bloque                 Boolean @default(false)
+  motifBlocage           String?
+
+  /// Carte fidelite : environ 3 460 cartes anonymes a rattacher (M6).
+  carteFidelite   String?  @unique
+  pointsFidelite  Int      @default(0)
+  /// Magasin rattache pour un client interne.
+  magasinInterneId String?
+
+  actif         Boolean  @default(true)
+  importeDepuis String?
+  creeLe        DateTime @default(now())
+  modifieLe     DateTime @updatedAt
+
+  magasinInterne Magasin?              @relation(fields: [magasinInterneId], references: [id])
+  mouvements     MouvementTiers[]
+  echeances      Echeance[]
+  documentsVente DocumentVente[]
+  commandes      CommandeFournisseur[]
+  receptions     Reception[]
+  facturesAchat  FactureAchat[]
+  operations     OperationTresorerie[]
+
+  @@index([type, actif])
+  @@index([raisonSociale])
+}
+
+enum SensMouvementTiers {
+  DEBIT    // le tiers nous doit davantage
+  CREDIT   // le tiers nous doit moins
+}
+
+/// Grand livre auxiliaire d'un tiers : chaque ligne porte le solde obtenu,
+/// ce qui permet un releve de compte sans recalcul (M6).
+model MouvementTiers {
+  id                String             @id @default(uuid())
+  tiersId           String
+  sens              SensMouvementTiers
+  montantCentimes   BigInt
+  soldeApresCentimes BigInt
+  categorie         String
+  libelle           String
+  documentType      String?
+  documentId        String?
+  documentNumero    String?
+  utilisateurId     String
+  date              DateTime           @default(now())
+  creeLe            DateTime           @default(now())
+
+  tiers       Tiers       @relation(fields: [tiersId], references: [id])
+  utilisateur Utilisateur @relation(fields: [utilisateurId], references: [id])
+
+  @@index([tiersId, date])
+  @@index([documentNumero])
+}
+
+model Echeance {
+  id              String   @id @default(uuid())
+  tiersId         String
+  documentNumero  String
+  montantCentimes BigInt
+  regleCentimes   BigInt   @default(0)
+  dateEcheance    DateTime
+  relanceLe       DateTime?
+  nombreRelances  Int      @default(0)
+  soldee          Boolean  @default(false)
+  creeLe          DateTime @default(now())
+  modifieLe       DateTime @updatedAt
+
+  tiers Tiers @relation(fields: [tiersId], references: [id])
+
+  @@index([tiersId, soldee])
+  @@index([dateEcheance, soldee])
+}
+
+// ---------------------------------------------------------------------
+// 5. M3 — Achats
+// ---------------------------------------------------------------------
+
+enum StatutCommande {
+  BROUILLON
+  ENVOYEE
+  PARTIELLE
+  RECUE
+  ANNULEE
+}
+
+model CommandeFournisseur {
+  id                String         @id @default(uuid())
+  numero            String         @unique
+  fournisseurId     String
+  magasinId         String
+  statut            StatutCommande @default(BROUILLON)
+  dateCommande      DateTime       @default(now())
+  dateLivraisonPrevue DateTime?
+  totalHtCentimes   BigInt         @default(0)
+  totalTvaCentimes  BigInt         @default(0)
+  totalTtcCentimes  BigInt         @default(0)
+  /// Trace de l'envoi par e-mail ou WhatsApp (M3).
+  envoyeeLe         DateTime?
+  canalEnvoi        String?
+  observation       String?
+  utilisateurId     String
+  creeLe            DateTime       @default(now())
+  modifieLe         DateTime       @updatedAt
+
+  fournisseur Tiers           @relation(fields: [fournisseurId], references: [id])
+  magasin     Magasin         @relation(fields: [magasinId], references: [id])
+  utilisateur Utilisateur     @relation(fields: [utilisateurId], references: [id])
+  lignes      LigneCommande[]
+  receptions  Reception[]
+
+  @@index([fournisseurId, statut])
+}
+
+model LigneCommande {
+  id                  String @id @default(uuid())
+  commandeId          String
+  articleId           String
+  quantiteMilli       Int
+  quantiteRecueMilli  Int    @default(0)
+  prixAchatCentimes   BigInt
+  remisePourcent      Int    @default(0)
+  tauxTva             Int    @default(0)
+  totalHtCentimes     BigInt @default(0)
+
+  commande CommandeFournisseur @relation(fields: [commandeId], references: [id], onDelete: Cascade)
+  article  Article             @relation(fields: [articleId], references: [id])
+
+  @@index([commandeId])
+}
+
+enum TypeReception {
+  RECEPTION
+  RETOUR
+}
+
+enum StatutReception {
+  BROUILLON
+  VALIDEE
+  ANNULEE
+}
+
+/// Reception fournisseur : c'est la validation d'une reception qui met a
+/// jour le stock ET recalcule le CUMP (M3).
+model Reception {
+  id                String          @id @default(uuid())
+  numero            String          @unique
+  type              TypeReception   @default(RECEPTION)
+  statut            StatutReception @default(BROUILLON)
+  fournisseurId     String
+  magasinId         String
+  emplacementId     String
+  commandeId        String?
+  /// Numero du bon de livraison du fournisseur.
+  numeroBonFournisseur String?
+  dateReception     DateTime        @default(now())
+  totalHtCentimes   BigInt          @default(0)
+  totalTvaCentimes  BigInt          @default(0)
+  totalTtcCentimes  BigInt          @default(0)
+  observation       String?
+  utilisateurId     String
+  valideeLe         DateTime?
+  creeLe            DateTime        @default(now())
+  modifieLe         DateTime        @updatedAt
+
+  fournisseur Tiers                @relation(fields: [fournisseurId], references: [id])
+  magasin     Magasin              @relation(fields: [magasinId], references: [id])
+  emplacement Emplacement          @relation(fields: [emplacementId], references: [id])
+  commande    CommandeFournisseur? @relation(fields: [commandeId], references: [id])
+  utilisateur Utilisateur          @relation(fields: [utilisateurId], references: [id])
+  lignes      LigneReception[]
+  factures    FactureAchat[]
+
+  @@index([fournisseurId, dateReception])
+  @@index([statut])
+}
+
+model LigneReception {
+  id                 String   @id @default(uuid())
+  receptionId        String
+  articleId          String
+  quantiteMilli      Int
+  prixAchatCentimes  BigInt
+  remisePourcent     Int      @default(0)
+  tauxTva            Int      @default(0)
+  totalHtCentimes    BigInt   @default(0)
+  /// CUMP avant et apres : la reception est auditable a la ligne pres.
+  cumpAvantCentimes  BigInt   @default(0)
+  cumpApresCentimes  BigInt   @default(0)
+  /// Nouveau prix de vente propose puis eventuellement applique (M3).
+  prixVenteProposeCentimes BigInt?
+  prixVenteAppliqueCentimes BigInt?
+  lotNumero          String?
+  datePeremption     DateTime?
+
+  reception Reception @relation(fields: [receptionId], references: [id], onDelete: Cascade)
+  article   Article   @relation(fields: [articleId], references: [id])
+
+  @@index([receptionId])
+}
+
+enum ModeReglementAchat {
+  COMPTANT
+  CREDIT
+}
+
+model FactureAchat {
+  id                  String             @id @default(uuid())
+  numero              String             @unique
+  numeroFournisseur   String?
+  fournisseurId       String
+  receptionId         String?
+  dateFacture         DateTime           @default(now())
+  dateEcheance        DateTime?
+  modeReglement       ModeReglementAchat @default(CREDIT)
+  totalHtCentimes     BigInt             @default(0)
+  totalTvaCentimes    BigInt             @default(0)
+  timbreCentimes      BigInt             @default(0)
+  totalTtcCentimes    BigInt             @default(0)
+  regleCentimes       BigInt             @default(0)
+  utilisateurId       String
+  creeLe              DateTime           @default(now())
+  modifieLe           DateTime           @updatedAt
+
+  fournisseur Tiers       @relation(fields: [fournisseurId], references: [id])
+  reception   Reception?  @relation(fields: [receptionId], references: [id])
+  utilisateur Utilisateur @relation(fields: [utilisateurId], references: [id])
+
+  @@index([fournisseurId, dateFacture])
+}
+
+// ---------------------------------------------------------------------
+// 6. M4 / M5 — Caisse, sessions, cloture Z, ventes
+// ---------------------------------------------------------------------
+
+model Caisse {
+  id              String   @id @default(uuid())
+  magasinId       String
+  numero          Int
+  libelle         String
+  /// Identifiant du poste physique, verifie a la connexion (section 6).
+  identifiantPoste String? @unique
+  /// Compteur local des documents : sert a former SV-03-000125.
+  compteurDocument Int     @default(0)
+  actif           Boolean  @default(true)
+  creeLe          DateTime @default(now())
+  modifieLe       DateTime @updatedAt
+
+  magasin        Magasin          @relation(fields: [magasinId], references: [id])
+  sessions       SessionCaisse[]
+  documentsVente DocumentVente[]
+  mouvements     MouvementStock[]
+  curseurSync    CurseurSync?
+  compte         CompteTresorerie?
+
+  @@unique([magasinId, numero])
+}
+
+enum StatutSession {
+  OUVERTE
+  CLOTUREE
+}
+
+/// Une session va de l'ouverture avec fond de caisse a la cloture Z.
+/// La cloture est bloquante : aucune nouvelle ouverture tant que la
+/// precedente n'est pas cloturee (M4).
+model SessionCaisse {
+  id                     String        @id @default(uuid())
+  numero                 String        @unique
+  caisseId               String
+  statut                 StatutSession @default(OUVERTE)
+  ouverteLe              DateTime      @default(now())
+  clotureeLe             DateTime?
+  fondDeCaisseCentimes   BigInt        @default(0)
+  utilisateurOuvertureId String
+  utilisateurClotureId   String?
+  /// Vrai si la session a vecu, en tout ou partie, hors ligne.
+  horsLigne              Boolean       @default(false)
+  creeLe                 DateTime      @default(now())
+  modifieLe              DateTime      @updatedAt
+
+  caisse               Caisse          @relation(fields: [caisseId], references: [id])
+  utilisateurOuverture Utilisateur     @relation("SessionOuverture", fields: [utilisateurOuvertureId], references: [id])
+  utilisateurCloture   Utilisateur?    @relation("SessionCloture", fields: [utilisateurClotureId], references: [id])
+  documents            DocumentVente[]
+  cloture              ClotureZ?
+  mouvementsCaisse     MouvementCaisse[]
+
+  @@index([caisseId, statut])
+}
+
+/// Cloture Z : le comptage par coupure est obligatoire et l'ecart,
+/// toujours calcule, doit etre justifie (objectif 6 du cahier des charges).
+model ClotureZ {
+  id                        String   @id @default(uuid())
+  numero                    String   @unique
+  sessionId                 String   @unique
+  theoriqueEspecesCentimes  BigInt
+  compteEspecesCentimes     BigInt
+  ecartCentimes             BigInt
+  justification             String?
+  /// Detail du comptage : [{ coupureCentimes, nombre }].
+  comptage                  Json
+  /// Totaux theoriques par mode de reglement.
+  totauxParMode             Json
+  nombreTickets             Int      @default(0)
+  nombreAnnulations         Int      @default(0)
+  totalRemisesCentimes      BigInt   @default(0)
+  horsLigne                 Boolean  @default(false)
+  /// Un ecart doit etre valide par un responsable (section 6).
+  valideParId               String?
+  valideeLe                 DateTime?
+  clotureeLe                DateTime @default(now())
+  creeLe                    DateTime @default(now())
+
+  session  SessionCaisse @relation(fields: [sessionId], references: [id])
+  validePar Utilisateur? @relation(fields: [valideParId], references: [id])
+}
+
+enum TypeDocumentVente {
+  TICKET
+  BON_LIVRAISON
+  FACTURE
+  PROFORMA
+  AVOIR
+  RETOUR
+}
+
+enum StatutDocumentVente {
+  VALIDE
+  ANNULE
+}
+
+model DocumentVente {
+  id            String              @id @default(uuid())
+  /// Numero unique attribue par la caisse : SV-03-000125 (section 4.3).
+  numero        String              @unique
+  type          TypeDocumentVente   @default(TICKET)
+  statut        StatutDocumentVente @default(VALIDE)
+  magasinId     String
+  caisseId      String?
+  sessionId     String?
+  clientId      String?
+  utilisateurId String
+  dateVente     DateTime            @default(now())
+
+  totalBrutCentimes    BigInt @default(0)
+  remisePiedCentimes   BigInt @default(0)
+  totalRemiseCentimes  BigInt @default(0)
+  totalHtCentimes      BigInt @default(0)
+  totalTvaCentimes     BigInt @default(0)
+  timbreCentimes       BigInt @default(0)
+  totalTtcCentimes     BigInt @default(0)
+  renduCentimes        BigInt @default(0)
+  /// Marge figee au moment de la vente (rapport M9).
+  margeCentimes        BigInt @default(0)
+
+  /// Vrai si le ticket a ete etabli pendant une coupure reseau.
+  horsLigne            Boolean @default(false)
+  /// Vrai si le prix pratique n'etait plus celui du serveur : le ticket est
+  /// conserve tel quel et signale dans un rapport (section 4.4).
+  prixPerime           Boolean @default(false)
+  /// Document d'origine pour un retour ou un avoir.
+  documentOrigineId    String?
+  /// Superviseur ayant autorise un forcage (remise, plafond de credit).
+  forcageSuperviseurId String?
+  motifAnnulation      String?
+  /// Horodatage de reception par le serveur, distinct de la date de vente.
+  recuLe               DateTime @default(now())
+  creeLe               DateTime @default(now())
+  modifieLe            DateTime @updatedAt
+
+  magasin            Magasin        @relation(fields: [magasinId], references: [id])
+  caisse             Caisse?        @relation(fields: [caisseId], references: [id])
+  session            SessionCaisse? @relation(fields: [sessionId], references: [id])
+  client             Tiers?         @relation(fields: [clientId], references: [id])
+  utilisateur        Utilisateur    @relation("VenteUtilisateur", fields: [utilisateurId], references: [id])
+  forcageSuperviseur Utilisateur?   @relation("VenteForcage", fields: [forcageSuperviseurId], references: [id])
+  documentOrigine    DocumentVente? @relation("RetourDe", fields: [documentOrigineId], references: [id])
+  retours            DocumentVente[] @relation("RetourDe")
+  lignes             LigneVente[]
+  reglements         Reglement[]
+
+  @@index([magasinId, dateVente])
+  @@index([dateVente])
+  @@index([clientId, dateVente])
+  @@index([sessionId])
+  @@index([utilisateurId, dateVente])
+}
+
+model LigneVente {
+  id                  String  @id @default(uuid())
+  documentId          String
+  numeroLigne         Int
+  articleId           String
+  /// Code reellement scanne, code balance compris : trace d'audit.
+  codeScanne          String?
+  designation         String
+  quantiteMilli       Int
+  prixUnitaireCentimes BigInt
+  remisePourcent      Int     @default(0)
+  remiseCentimes      BigInt  @default(0)
+  tauxTva             Int     @default(0)
+  totalHtCentimes     BigInt  @default(0)
+  totalTvaCentimes    BigInt  @default(0)
+  totalTtcCentimes    BigInt  @default(0)
+  /// CUMP au moment de la vente : fige la marge de la ligne.
+  cumpCentimes        BigInt  @default(0)
+  margeCentimes       BigInt  @default(0)
+  annulee             Boolean @default(false)
+  autoriseeParId      String?
+  promotionId         String?
+  /// Pack vendu : nombre d'unites de base reellement sorties du stock.
+  unitesStockMilli    Int?
+
+  document    DocumentVente @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  article     Article       @relation(fields: [articleId], references: [id])
+  autoriseePar Utilisateur? @relation(fields: [autoriseeParId], references: [id])
+  promotion   Promotion?    @relation(fields: [promotionId], references: [id])
+
+  @@index([documentId])
+  @@index([articleId])
+}
+
+enum ModePaiement {
+  ESPECES
+  CARTE
+  CHEQUE
+  CREDIT
+  BON_ACHAT
+  VIREMENT
+}
+
+model Reglement {
+  id              String       @id @default(uuid())
+  documentId      String
+  mode            ModePaiement
+  montantCentimes BigInt
+  reference       String?
+  compteId        String?
+  creeLe          DateTime     @default(now())
+
+  document DocumentVente     @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  compte   CompteTresorerie? @relation(fields: [compteId], references: [id])
+
+  @@index([documentId])
+  @@index([mode])
+}
+
+// ---------------------------------------------------------------------
+// 7. M7 — Tresorerie
+// ---------------------------------------------------------------------
+
+enum TypeCompte {
+  CAISSE
+  TIROIR
+  COFFRE
+  BANQUE
+  CCP
+}
+
+model CompteTresorerie {
+  id            String     @id @default(uuid())
+  code          String     @unique
+  libelle       String
+  type          TypeCompte
+  magasinId     String?
+  /// Un compte de type TIROIR est rattache a une caisse physique.
+  caisseId      String?    @unique
+  soldeCentimes BigInt     @default(0)
+  numeroCompte  String?
+  banque        String?
+  actif         Boolean    @default(true)
+  creeLe        DateTime   @default(now())
+  modifieLe     DateTime   @updatedAt
+
+  magasin     Magasin?              @relation(fields: [magasinId], references: [id])
+  caisse      Caisse?               @relation(fields: [caisseId], references: [id])
+  operations  OperationTresorerie[]
+  reglements  Reglement[]
+  transfertsSortants TransfertTresorerie[] @relation("CompteSource")
+  transfertsEntrants TransfertTresorerie[] @relation("CompteDestination")
+
+  @@index([magasinId])
+}
+
+enum SensOperation {
+  ENTREE
+  SORTIE
+}
+
+enum CategorieOperation {
+  VENTE_COMPTANT
+  REGLEMENT_CLIENT
+  PAIEMENT_FOURNISSEUR
+  ACHAT_COMPTANT
+  DEPENSE
+  SALAIRE
+  AVANCE_SALAIRE
+  APPORT_GERANT
+  RETRAIT_GERANT
+  TRANSFERT
+  ECART_CAISSE
+  AUTRE
+}
+
+/// Toute entree et sortie d'argent. Les apports et retraits du gerant
+/// correspondent aux ecritures "extra-commerciales" de l'ancien logiciel.
+model OperationTresorerie {
+  id              String             @id @default(uuid())
+  numero          String             @unique
+  compteId        String
+  sens            SensOperation
+  categorie       CategorieOperation
+  montantCentimes BigInt
+  soldeApresCentimes BigInt
+  libelle         String
+  tiersId         String?
+  employeId       String?
+  documentType    String?
+  documentNumero  String?
+  transfertId     String?
+  /// Rapprochement bancaire (M7).
+  pointee         Boolean            @default(false)
+  dateRapprochement DateTime?
+  date            DateTime           @default(now())
+  utilisateurId   String
+  creeLe          DateTime           @default(now())
+
+  compte      CompteTresorerie     @relation(fields: [compteId], references: [id])
+  tiers       Tiers?               @relation(fields: [tiersId], references: [id])
+  employe     Employe?             @relation(fields: [employeId], references: [id])
+  utilisateur Utilisateur          @relation(fields: [utilisateurId], references: [id])
+  transfert   TransfertTresorerie? @relation(fields: [transfertId], references: [id])
+
+  @@index([compteId, date])
+  @@index([categorie, date])
+  @@index([date])
+}
+
+enum StatutTransfert {
+  EN_ATTENTE
+  VALIDE
+  REFUSE
+}
+
+/// Transfert caisse vers coffre ou banque : exige une double validation
+/// (M7). L'argent n'est deplace qu'une fois le transfert valide.
+model TransfertTresorerie {
+  id                 String          @id @default(uuid())
+  numero             String          @unique
+  compteSourceId     String
+  compteDestinationId String
+  montantCentimes    BigInt
+  statut             StatutTransfert @default(EN_ATTENTE)
+  motif              String?
+  demandeParId       String
+  valideParId        String?
+  demandeLe          DateTime        @default(now())
+  valideLe           DateTime?
+  commentaireRefus   String?
+
+  compteSource      CompteTresorerie @relation("CompteSource", fields: [compteSourceId], references: [id])
+  compteDestination CompteTresorerie @relation("CompteDestination", fields: [compteDestinationId], references: [id])
+  demandePar        Utilisateur      @relation("TransfertDemande", fields: [demandeParId], references: [id])
+  validePar         Utilisateur?     @relation("TransfertValidation", fields: [valideParId], references: [id])
+  operations        OperationTresorerie[]
+
+  @@index([statut])
+}
+
+enum TypeMouvementCaisse {
+  ENTREE_TIROIR
+  SORTIE_TIROIR
+  PRELEVEMENT_COFFRE
+}
+
+/// Mouvements d'especes du tiroir pendant une session, hors ventes :
+/// achat comptant, depense reglee du tiroir, prelevement vers le coffre.
+model MouvementCaisse {
+  id              String              @id @default(uuid())
+  reference       String              @unique
+  sessionId       String
+  type            TypeMouvementCaisse
+  montantCentimes BigInt
+  motif           String
+  date            DateTime            @default(now())
+  utilisateurId   String
+  creeLe          DateTime            @default(now())
+
+  session     SessionCaisse @relation(fields: [sessionId], references: [id])
+  utilisateur Utilisateur   @relation(fields: [utilisateurId], references: [id])
+
+  @@index([sessionId])
+}
+
+// ---------------------------------------------------------------------
+// 8. M8 — Utilisateurs, roles, autorisations, audit
+// ---------------------------------------------------------------------
+
+enum CodeRole {
+  CAISSIER
+  CHEF_DE_CAISSE
+  MAGASINIER
+  ACHETEUR
+  COMPTABLE
+  GERANT
+}
+
+model Utilisateur {
+  id             String   @id @default(uuid())
+  /// Numero repris de l'ancien logiciel : les 11 utilisateurs existants
+  /// sont recrees avec leur numero pour garder la tracabilite (section 6).
+  code           String   @unique
+  nom            String
+  login          String   @unique
+  email          String?
+  motDePasseHash String?
+  /// Empreinte du code PIN de caisse. Le PIN en clair n'est jamais stocke
+  /// ni journalise, et ne quitte le serveur que sous forme d'empreinte.
+  pinHash        String?
+  role           CodeRole
+
+  /// Droits ajoutes ou retires individuellement par-dessus le role.
+  permissionsAjoutees Json @default("[]")
+  permissionsRetirees Json @default("[]")
+
+  /// Double authentification exigee pour tout acces depuis Internet.
+  doubleAuthActive Boolean @default(false)
+  secretTotp       String?
+
+  /// Plages horaires autorisees : [{ jour: 1, debut: "07:00", fin: "22:00" }].
+  plagesHoraires   Json?
+  /// Identifiants de postes autorises ; vide = tous les postes.
+  postesAutorises  Json    @default("[]")
+
+  actif            Boolean   @default(true)
+  derniereConnexion DateTime?
+  tentativesEchouees Int      @default(0)
+  bloqueJusqua     DateTime?
+  employeId        String?   @unique
+  importeDepuis    String?
+  creeLe           DateTime  @default(now())
+  modifieLe        DateTime  @updatedAt
+
+  employe   Employe?             @relation(fields: [employeId], references: [id])
+  magasins  UtilisateurMagasin[]
+  jetons    JetonRafraichissement[]
+
+  journalAudit          JournalAudit[]
+  historiquePrix        HistoriquePrix[]
+  mouvementsStock       MouvementStock[]
+  mouvementsTiers       MouvementTiers[]
+  mouvementsCaisse      MouvementCaisse[]
+  inventairesSaisis     Inventaire[]         @relation("InventaireSaisie")
+  inventairesValides    Inventaire[]         @relation("InventaireValidation")
+  commandes             CommandeFournisseur[]
+  receptions            Reception[]
+  facturesAchat         FactureAchat[]
+  sessionsOuvertes      SessionCaisse[]      @relation("SessionOuverture")
+  sessionsCloturees     SessionCaisse[]      @relation("SessionCloture")
+  cloturesValidees      ClotureZ[]
+  ventes                DocumentVente[]      @relation("VenteUtilisateur")
+  forcages              DocumentVente[]      @relation("VenteForcage")
+  lignesAutorisees      LigneVente[]
+  operations            OperationTresorerie[]
+  transfertsDemandes    TransfertTresorerie[] @relation("TransfertDemande")
+  transfertsValides     TransfertTresorerie[] @relation("TransfertValidation")
+  sessionsImport        SessionImport[]
+
+  @@index([role, actif])
+}
+
+model UtilisateurMagasin {
+  utilisateurId String
+  magasinId     String
+
+  utilisateur Utilisateur @relation(fields: [utilisateurId], references: [id], onDelete: Cascade)
+  magasin     Magasin     @relation(fields: [magasinId], references: [id], onDelete: Cascade)
+
+  @@id([utilisateurId, magasinId])
+}
+
+model JetonRafraichissement {
+  id            String   @id @default(uuid())
+  utilisateurId String
+  empreinte     String   @unique
+  expireLe      DateTime
+  revoqueLe     DateTime?
+  adresseIp     String?
+  agent         String?
+  creeLe        DateTime @default(now())
+
+  utilisateur Utilisateur @relation(fields: [utilisateurId], references: [id], onDelete: Cascade)
+
+  @@index([utilisateurId])
+}
+
+/// Journal d'audit non modifiable (section 6).
+/// Chaque entree porte l'empreinte de la precedente : toute suppression ou
+/// retouche d'une ligne casse la chaine et devient detectable.
+model JournalAudit {
+  id              String   @id @default(uuid())
+  numero          BigInt   @unique @default(autoincrement())
+  date            DateTime @default(now())
+  utilisateurId   String?
+  action          String
+  entite          String?
+  entiteId        String?
+  magasinId       String?
+  caisseId        String?
+  poste           String?
+  adresseIp       String?
+  details         Json?
+  empreintePrecedente String?
+  empreinte       String
+
+  utilisateur Utilisateur? @relation(fields: [utilisateurId], references: [id])
+
+  @@index([date])
+  @@index([utilisateurId, date])
+  @@index([entite, entiteId])
+  @@index([action, date])
+}
+
+// ---------------------------------------------------------------------
+// 9. M10 — Fidelite et promotions
+// ---------------------------------------------------------------------
+
+enum TypePromotion {
+  PRIX_BARRE
+  X_POUR_Y
+  REMISE_FAMILLE
+  HAPPY_HOUR
+}
+
+model Promotion {
+  id                    String        @id @default(uuid())
+  code                  String        @unique
+  libelle               String
+  type                  TypePromotion
+  debut                 DateTime
+  fin                   DateTime
+  articleId             String?
+  familleId             String?
+  valeurCentimes        BigInt?
+  remisePourcent        Int?
+  quantiteDeclenchement Int?
+  quantiteOfferte       Int?
+  /// Plage horaire pour une happy hour : "18:00" -> "20:00".
+  heureDebut            String?
+  heureFin              String?
+  cumulable             Boolean       @default(false)
+  actif                 Boolean       @default(true)
+  creeLe                DateTime      @default(now())
+  modifieLe             DateTime      @updatedAt
+
+  article Article?     @relation(fields: [articleId], references: [id])
+  famille Famille?     @relation(fields: [familleId], references: [id])
+  lignes  LigneVente[]
+
+  @@index([actif, debut, fin])
+}
+
+enum TypeBon {
+  CARTE_CADEAU
+  BON_ACHAT
+}
+
+model BonAchat {
+  id               String   @id @default(uuid())
+  code             String   @unique
+  type             TypeBon
+  montantCentimes  BigInt
+  soldeCentimes    BigInt
+  emisLe           DateTime @default(now())
+  expireLe         DateTime?
+  clientId         String?
+  utilise          Boolean  @default(false)
+  documentEmissionNumero String?
+  creeLe           DateTime @default(now())
+  modifieLe        DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------
+// 10. M13 — Gestion du personnel
+// ---------------------------------------------------------------------
+
+enum TypeContrat {
+  CDI
+  CDD
+  ESSAI
+  TEMPS_PARTIEL
+}
+
+model Employe {
+  id                String   @id @default(uuid())
+  matricule         String   @unique
+  nom               String
+  prenom            String
+  nin               String?
+  numeroSecuriteSociale String?
+  dateNaissance     DateTime?
+  adresse           String?
+  telephone         String?
+  situationFamiliale String?
+  nombreEnfants     Int      @default(0)
+  poste             String?
+  magasinId         String?
+  dateEmbauche      DateTime?
+  dateSortie        DateTime?
+  photoUrl          String?
+  /// Documents scannes : [{ type, nom, url, deposeLe }].
+  documents         Json     @default("[]")
+  soldeCongesJours  Int      @default(0)
+  actif             Boolean  @default(true)
+  creeLe            DateTime @default(now())
+  modifieLe         DateTime @updatedAt
+
+  magasin     Magasin?              @relation(fields: [magasinId], references: [id])
+  utilisateur Utilisateur?
+  contrats    Contrat[]
+  pointages   Pointage[]
+  plannings   Planning[]
+  absences    Absence[]
+  avances     AvanceSalaire[]
+  bulletins   BulletinPaie[]
+  operations  OperationTresorerie[]
+
+  @@index([magasinId, actif])
+}
+
+model Contrat {
+  id                  String      @id @default(uuid())
+  employeId           String
+  type                TypeContrat
+  debut               DateTime
+  fin                 DateTime?
+  salaireBaseCentimes BigInt
+  primesFixes         Json        @default("[]")
+  /// Alerte 30 jours avant la fin d'un CDD ou d'une periode d'essai (M13).
+  alerteEnvoyeeLe     DateTime?
+  actif               Boolean     @default(true)
+  creeLe              DateTime    @default(now())
+  modifieLe           DateTime    @updatedAt
+
+  employe Employe @relation(fields: [employeId], references: [id], onDelete: Cascade)
+
+  @@index([employeId, actif])
+  @@index([fin])
+}
+
+/// Pointage par code PIN ou badge, sur la caisse ou un poste dedie.
+/// Fonctionne hors ligne puis remonte comme les tickets.
+model Pointage {
+  id            String   @id @default(uuid())
+  reference     String   @unique
+  employeId     String
+  date          DateTime
+  entree        DateTime?
+  sortie        DateTime?
+  minutesTravaillees Int @default(0)
+  minutesRetard Int      @default(0)
+  source        String?
+  horsLigne     Boolean  @default(false)
+  creeLe        DateTime @default(now())
+  modifieLe     DateTime @updatedAt
+
+  employe Employe @relation(fields: [employeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeId, date])
+  @@index([date])
+}
+
+model Planning {
+  id         String   @id @default(uuid())
+  magasinId  String
+  employeId  String
+  date       DateTime
+  heureDebut String
+  heureFin   String
+  poste      String?
+  /// Echange de poste valide par le gerant (M13).
+  echangeAvecEmployeId String?
+  valideParId String?
+  creeLe     DateTime @default(now())
+  modifieLe  DateTime @updatedAt
+
+  magasin Magasin @relation(fields: [magasinId], references: [id])
+  employe Employe @relation(fields: [employeId], references: [id], onDelete: Cascade)
+
+  @@index([magasinId, date])
+  @@index([employeId, date])
+}
+
+enum TypeAbsence {
+  CONGE_ANNUEL
+  MALADIE
+  INJUSTIFIEE
+  AUTORISATION
+}
+
+enum StatutAbsence {
+  DEMANDEE
+  VALIDEE
+  REFUSEE
+}
+
+model Absence {
+  id          String        @id @default(uuid())
+  employeId   String
+  type        TypeAbsence
+  statut      StatutAbsence @default(DEMANDEE)
+  debut       DateTime
+  fin         DateTime
+  nombreJours Int
+  motif       String?
+  justificatifUrl String?
+  valideParId String?
+  valideeLe   DateTime?
+  creeLe      DateTime      @default(now())
+  modifieLe   DateTime      @updatedAt
+
+  employe Employe @relation(fields: [employeId], references: [id], onDelete: Cascade)
+
+  @@index([employeId, debut])
+}
+
+/// Avance sur salaire : enregistree en tresorerie (M7) et deduite
+/// automatiquement de la paie suivante (M13).
+model AvanceSalaire {
+  id              String   @id @default(uuid())
+  numero          String   @unique
+  employeId       String
+  montantCentimes BigInt
+  rembourseCentimes BigInt @default(0)
+  date            DateTime @default(now())
+  motif           String?
+  bulletinId      String?
+  creeLe          DateTime @default(now())
+  modifieLe       DateTime @updatedAt
+
+  employe  Employe       @relation(fields: [employeId], references: [id], onDelete: Cascade)
+  bulletin BulletinPaie? @relation(fields: [bulletinId], references: [id])
+
+  @@index([employeId])
+}
+
+model BulletinPaie {
+  id                     String   @id @default(uuid())
+  numero                 String   @unique
+  employeId              String
+  periodeAnnee           Int
+  periodeMois            Int
+  salaireBaseCentimes    BigInt   @default(0)
+  heuresSupplementaires  Int      @default(0)
+  heuresSupCentimes      BigInt   @default(0)
+  primesCentimes         BigInt   @default(0)
+  /// Retenues : absences, avances, ecarts de caisse si la regle interne
+  /// le prevoit. Detail : [{ libelle, montantCentimes, origine }].
+  retenues               Json     @default("[]")
+  retenuesCentimes       BigInt   @default(0)
+  brutCentimes           BigInt   @default(0)
+  cotisationsCentimes    BigInt   @default(0)
+  irgCentimes            BigInt   @default(0)
+  netAPayerCentimes      BigInt   @default(0)
+  /// Taux appliques, conserves pour justifier un bulletin ancien.
+  tauxAppliques          Json?
+  payeLe                 DateTime?
+  pdfUrl                 String?
+  creeLe                 DateTime @default(now())
+  modifieLe              DateTime @updatedAt
+
+  employe Employe         @relation(fields: [employeId], references: [id], onDelete: Cascade)
+  avances AvanceSalaire[]
+
+  @@unique([employeId, periodeAnnee, periodeMois])
+}
+
+// ---------------------------------------------------------------------
+// 11. Synchronisation, import, parametres
+// ---------------------------------------------------------------------
+
+/// Curseur de descente par caisse (section 4.1).
+model CurseurSync {
+  id                  String   @id @default(uuid())
+  caisseId            String   @unique
+  curseur             String?
+  derniereDescenteLe  DateTime?
+  derniereRemonteeLe  DateTime?
+  versionProtocole    Int      @default(1)
+  /// Derniere version applicative vue sur la caisse.
+  versionCaisse       String?
+  modifieLe           DateTime @updatedAt
+
+  caisse Caisse @relation(fields: [caisseId], references: [id], onDelete: Cascade)
+}
+
+/// Pierre tombale : une entite supprimee ou devenue invisible doit aussi
+/// descendre vers les caisses, sinon elle y resterait vendable.
+model Tombstone {
+  id       String   @id @default(uuid())
+  entite   String
+  entiteId String
+  date     DateTime @default(now())
+
+  @@unique([entite, entiteId])
+  @@index([date])
+}
+
+enum TypeImport {
+  BLANC
+  DEFINITIF
+}
+
+enum StatutImport {
+  EN_COURS
+  TERMINE
+  ECHOUE
+  ANNULE
+}
+
+/// Assistant d'import de l'export Excel de l'ancien logiciel (section 7).
+model SessionImport {
+  id            String       @id @default(uuid())
+  nomFichier    String
+  type          TypeImport
+  statut        StatutImport @default(EN_COURS)
+  /// Compteurs par onglet : { PRODUITS: { lus, importes, ignores, erreurs } }.
+  rapport       Json         @default("{}")
+  /// Controles de bascule : nombre d'articles, valeur du stock au CUMP,
+  /// total des soldes clients et fournisseurs (section 7, deroule 4).
+  controles     Json?
+  debuteLe      DateTime     @default(now())
+  termineLe     DateTime?
+  utilisateurId String
+  creeLe        DateTime     @default(now())
+
+  utilisateur Utilisateur      @relation(fields: [utilisateurId], references: [id])
+  anomalies   AnomalieImport[]
+}
+
+enum GraviteAnomalie {
+  INFO
+  AVERTISSEMENT
+  ERREUR
+}
+
+model AnomalieImport {
+  id        String          @id @default(uuid())
+  sessionId String
+  onglet    String
+  ligne     Int?
+  champ     String?
+  valeur    String?
+  gravite   GraviteAnomalie
+  code      String
+  message   String
+  creeLe    DateTime        @default(now())
+
+  session SessionImport @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, gravite])
+}
+
+/// Parametres. magasinId nul = valeur globale, sinon surcharge du magasin.
+model Parametre {
+  id          String   @id @default(uuid())
+  cle         String
+  magasinId   String?
+  valeur      Json
+  description String?
+  modifieLe   DateTime @updatedAt
+
+  magasin Magasin? @relation(fields: [magasinId], references: [id])
+
+  @@unique([cle, magasinId])
+}

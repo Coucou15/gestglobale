@@ -1,0 +1,33 @@
+{
+  "name": "gestglobale",
+  "version": "0.1.0",
+  "private": true,
+  "description": "GestGlobale — ERP pour superettes (caisse hors ligne, stocks, achats, tresorerie)",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint",
+    "db:migrate": "pnpm --filter @gestglobale/api prisma:migrate",
+    "db:seed": "pnpm --filter @gestglobale/api seed",
+    "dev:api": "pnpm --filter @gestglobale/api dev",
+    "dev:bo": "pnpm --filter @gestglobale/backoffice dev",
+    "dev:pos": "pnpm --filter @gestglobale/pos dev"
+  },
+  "devDependencies": {
+    "typescript": "5.6.3",
+    "@types/node": "22.7.5"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@nestjs/core",
+      "@prisma/client",
+      "@prisma/engines",
+      "prisma",
+      "argon2",
+      "esbuild"
+    ]
+  }
+}
