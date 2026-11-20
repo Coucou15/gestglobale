@@ -14,11 +14,15 @@ a M8, l'assistant de migration et la caisse hors ligne.
 |---|---|
 | Serveur central (API + PostgreSQL) | 13 modules, 54 tables, operationnel |
 | Caisse hors ligne (Electron + SQLite) | vend, encaisse, cloture et resynchronise sans reseau |
-| Back-office web (React) | tableau de bord, articles, stocks, caisses, tiers, tresorerie, audit |
+| Back-office web (React) | tableau de bord, articles, stocks, receptions, inventaires, caisses, tiers, tresorerie, audit |
 | Assistant d'import | lit l'export Excel de l'ancien logiciel, le controle et le charge |
 
 **114 verifications automatisees** passent contre une vraie base et une
 API reellement demarree : `pnpm recette`.
+
+Le parcours de saisie est verifie dans un vrai navigateur, de la
+reception a l'inventaire jusqu'au cloisonnement des droits :
+`node apps/backoffice/test-navigateur.mjs`, API et back-office demarres.
 
 Un **test de charge au volume reel** (30 015 articles, 430 tickets sur
 2 caisses) tient les quatre exigences chiffrees de la section 8 avec un a
@@ -296,10 +300,10 @@ ligne produisent exactement les memes ecritures.
 L'etat detaille, module par module, est dans
 [`docs/etat-du-projet.md`](docs/etat-du-projet.md).
 
-En resume : le lot 1 est pose et verifie. Restent l'empaquetage Windows de
-la caisse, les ecrans de saisie des achats et inventaires au back-office,
-puis les lots 2 et 3 (rapports, fidelite, multi-magasins, comptabilite,
-personnel).
+En resume : le lot 1 est pose et verifie, saisie comprise. Restent
+l'empaquetage Windows de la caisse, les documents de vente a valeur legale
+(factures, bons de livraison, proformas), puis les lots 2 et 3 (rapports,
+fidelite, multi-magasins, comptabilite, personnel).
 
 Plusieurs points demandent une decision de votre part avant d'aller plus
 loin ; ils sont listes a la fin du meme document.

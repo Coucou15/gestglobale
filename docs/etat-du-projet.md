@@ -17,11 +17,11 @@ a venir = non commence.
 |---|---|---|---|
 | M1 | Articles | 1 | **fait** |
 | M2 | Stocks | 1 | **fait** |
-| M3 | Achats | 1 | *partiel* — API complete, ecrans de saisie a faire |
+| M3 | Achats | 1 | **fait** — ecrans de saisie compris ; reste l'envoi du bon de commande par courriel ou WhatsApp |
 | M4 | Caisse (POS) | 1 | **fait** |
 | M5 | Ventes | 1 | *partiel* — tickets et retours faits ; factures, bons de livraison et proformas a faire |
 | M6 | Tiers | 1 | **fait** |
-| M7 | Tresorerie | 1 | *partiel* — API complete, ecrans de saisie a faire |
+| M7 | Tresorerie | 1 | **fait** — depenses, salaires, apports, retraits et transferts a double validation |
 | M8 | Utilisateurs et droits | 1 | **fait** |
 | M9 | Tableaux de bord et rapports | 2 | *partiel* — chiffres du jour, rapport de periode, top et flop produits, produits dormants, ecarts de caisse, stocks negatifs ; exports Excel et PDF et resume quotidien a faire |
 | M10 | Fidelite et promotions | 2 | *partiel* — modele de donnees et descente vers la caisse faits ; application en vente a faire |
@@ -44,14 +44,17 @@ internes (le moteur de generation existe, pas la mise en page).
 modifiables, transferts, inventaires tournants et complets valides par un
 responsable, lots et dates de peremption, alertes de reassort distinguant
 ce qui vient du depot de ce qu'il faut commander, interdiction
-parametrable du stock negatif. **Reste** : application mobile de
-l'inventaire au scanner (l'API de comptage est prete et accepte deja une
-source de saisie).
+parametrable du stock negatif. L'ecran d'inventaire separe la saisie du
+comptage de la validation, et dit a celui qui ne peut pas valider
+pourquoi. **Reste** : application mobile de l'inventaire au scanner
+(l'API de comptage est prete et accepte deja une source de saisie).
 
 **M3 — Achats.** Commandes, receptions, retours, factures, echeances,
 recalcul du CUMP et proposition du nouveau prix de vente, comparaison des
-fournisseurs sur un meme article. **Reste** : les ecrans de saisie au
-back-office, et l'envoi du bon de commande par courriel ou WhatsApp en PDF.
+fournisseurs sur un meme article. L'ecran de reception se tient a la
+douchette : la reception naît en brouillon, et la fenetre de validation
+montre le CUMP avant et le prix de vente propose avant de s'engager.
+**Reste** : l'envoi du bon de commande par courriel ou WhatsApp en PDF.
 
 **M4 — Caisse.** Voir le README. **Reste** : mise en attente de tickets,
 touches rapides parametrables, afficheur client, et l'empaquetage Windows.
@@ -68,7 +71,10 @@ fusion des doublons avec reprise des cartes fidelite anonymes.
 **M7 — Tresorerie.** Comptes (caisse, tiroir, coffre, banque, CCP),
 encaissements et decaissements, transferts a double validation ou le
 demandeur ne peut pas valider, rapprochement bancaire, situation
-consolidee. **Reste** : les ecrans de saisie des depenses et salaires.
+consolidee. Les comptes d'especes — caisse, tiroir, coffre — refusent un
+solde negatif, puisqu'on ne sort pas des billets qui ne sont pas la ;
+banque et CCP admettent un decouvert. **Reste** : rattacher une avance
+sur salaire a un employe une fois le module M13 construit.
 
 **M8 — Utilisateurs et droits.** Matrice des six roles, droits ajoutes ou
 retires individuellement, plages horaires, postes autorises, blocage apres
@@ -156,8 +162,8 @@ continuer, mais chacun changera du code s'il est tranche plus tard.
    comparer les controles de bascule avec l'ancien logiciel.
 2. Empaqueter la caisse pour Windows et l'installer sur un poste reel avec
    sa douchette, son imprimante et son tiroir.
-3. Completer les ecrans de saisie du back-office : receptions, inventaires,
-   depenses.
+3. Produire les documents de vente a valeur legale (factures, bons de
+   livraison, proformas, avoirs) avec leur mise en page.
 4. Refaire le test de charge sur le serveur du client : le ProLiant
    ML330 G6 n'a pas de SSD et les durees y seront moins bonnes que dans
    l'environnement de developpement.
