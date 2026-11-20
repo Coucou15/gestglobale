@@ -56,7 +56,7 @@ couleur '1/5  Construction'
 couleur '2/5  Noyau metier (hors base, hors reseau)'
 ( cd "$RACINE/packages/shared" && npx vitest run )
 
-couleur '3/5  Nettoyage a l'import de l'export de l'ancien logiciel'
+couleur "3/5  Nettoyage a l'import de l'export de l'ancien logiciel"
 ( cd "$API" && npx vitest run )
 
 couleur '4/5  Recette fonctionnelle du lot 1 (API + PostgreSQL)'
