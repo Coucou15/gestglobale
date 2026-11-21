@@ -97,6 +97,35 @@ export async function appeler<T>(
   return (await reponse.json()) as T;
 }
 
+/**
+ * Ouvre un document a imprimer dans un nouvel onglet.
+ *
+ * Le document est servi par une route protegee : un simple `window.open`
+ * n'enverrait aucun jeton et recevrait un refus. On le recupere donc avec
+ * l'en-tete d'authentification, puis on l'ouvre depuis la memoire du
+ * navigateur. Le document etant autonome — styles compris — il s'affiche
+ * et s'imprime sans rien aller rechercher.
+ */
+export async function ouvrirImpression(chemin: string): Promise<void> {
+  const reponse = await fetch(`${BASE}${chemin}`, {
+    headers: { ...(jeton() ? { Authorization: `Bearer ${jeton()}` } : {}) },
+  });
+  if (!reponse.ok) {
+    throw new ErreurApi(reponse.status, `Impression impossible (erreur ${reponse.status})`);
+  }
+  const html = await reponse.text();
+  const adresse = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
+  const onglet = window.open(adresse, '_blank');
+  if (!onglet) {
+    URL.revokeObjectURL(adresse);
+    throw new Error(
+      'Le navigateur a bloque la fenetre d\u2019impression : autorisez les fenetres surgissantes.',
+    );
+  }
+  // L'adresse temporaire est liberee une fois l'onglet charge.
+  window.setTimeout(() => URL.revokeObjectURL(adresse), 60000);
+}
+
 export function formaterDA(centimes: number | undefined | null): string {
   const valeur = (centimes ?? 0) / 100;
   return valeur.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' DA';

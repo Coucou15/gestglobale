@@ -899,6 +899,25 @@ model DocumentVente {
   /// Superviseur ayant autorise un forcage (remise, plafond de credit).
   forcageSuperviseurId String?
   motifAnnulation      String?
+
+  /// Mentions legales figees a l'emission : raison sociale, adresse, RC,
+  /// NIF, NIS et article d'imposition de l'emetteur et du destinataire.
+  ///
+  /// Recopiees et non referencees : une facture est un document immuable.
+  /// Si le client demenage ou change de NIF, la facture deja emise doit
+  /// continuer de porter ce qui etait vrai le jour de son emission.
+  mentions             Json?
+  /// Echeance de paiement pour une vente a credit.
+  dateEcheance         DateTime?
+  observation          String?
+  /// Document d'origine pour une facture nee d'un bon de livraison, ou
+  /// pour une proforma transformee en facture.
+  documentSourceId     String?
+  /// Vrai tant que le document n'a pas ete valide : il reste modifiable
+  /// et ne porte pas encore de numero definitif.
+  brouillon            Boolean  @default(false)
+  valideLe             DateTime?
+
   /// Horodatage de reception par le serveur, distinct de la date de vente.
   recuLe               DateTime @default(now())
   creeLe               DateTime @default(now())
@@ -910,8 +929,10 @@ model DocumentVente {
   client             Tiers?         @relation(fields: [clientId], references: [id])
   utilisateur        Utilisateur    @relation("VenteUtilisateur", fields: [utilisateurId], references: [id])
   forcageSuperviseur Utilisateur?   @relation("VenteForcage", fields: [forcageSuperviseurId], references: [id])
-  documentOrigine    DocumentVente? @relation("RetourDe", fields: [documentOrigineId], references: [id])
+  documentOrigine    DocumentVente?  @relation("RetourDe", fields: [documentOrigineId], references: [id])
   retours            DocumentVente[] @relation("RetourDe")
+  documentSource     DocumentVente?  @relation("IssuDe", fields: [documentSourceId], references: [id])
+  documentsIssus     DocumentVente[] @relation("IssuDe")
   lignes             LigneVente[]
   reglements         Reglement[]
 

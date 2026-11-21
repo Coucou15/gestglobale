@@ -19,7 +19,7 @@ a venir = non commence.
 | M2 | Stocks | 1 | **fait** |
 | M3 | Achats | 1 | **fait** — ecrans de saisie compris ; reste l'envoi du bon de commande par courriel ou WhatsApp |
 | M4 | Caisse (POS) | 1 | **fait** |
-| M5 | Ventes | 1 | *partiel* — tickets et retours faits ; factures, bons de livraison et proformas a faire |
+| M5 | Ventes | 1 | **fait** — tickets, retours, factures, bons de livraison, proformas et avoirs |
 | M6 | Tiers | 1 | **fait** |
 | M7 | Tresorerie | 1 | **fait** — depenses, salaires, apports, retraits et transferts a double validation |
 | M8 | Utilisateurs et droits | 1 | **fait** |
@@ -60,8 +60,13 @@ montre le CUMP avant et le prix de vente propose avant de s'engager.
 touches rapides parametrables, afficheur client, et l'empaquetage Windows.
 
 **M5 — Ventes.** Tickets, retours, annulations par contre-ecriture, ventes
-a credit avec plafond. **Reste** : factures, bons de livraison, proformas
-et avoirs avec leur mise en page legale.
+a credit avec plafond. Factures, bons de livraison, proformas et avoirs
+etablis au back-office : numerotation sans trou par type et par annee,
+mentions legales figees a l'emission, montant en toutes lettres,
+impression A4. Une proforma se transforme en facture ou en bon de
+livraison, un bon de livraison en facture, une facture en avoir — chaque
+transformation une seule fois. **Reste** : l'envoi par courriel, qui
+demandera une generation PDF cote serveur.
 
 **M6 — Tiers.** Fiche complete, types de client, soldes tenus sous verrou,
 releve de compte sans recalcul, echeancier, plafond de credit et blocage,
@@ -163,8 +168,8 @@ continuer, mais chacun changera du code s'il est tranche plus tard.
    Voir [`rapport-import-VENTES_2026.md`](rapport-import-VENTES_2026.md).
 2. Empaqueter la caisse pour Windows et l'installer sur un poste reel avec
    sa douchette, son imprimante et son tiroir.
-3. Produire les documents de vente a valeur legale (factures, bons de
-   livraison, proformas, avoirs) avec leur mise en page.
+3. Ajouter une generation PDF cote serveur, pour envoyer les factures par
+   courriel sans intervention humaine.
 4. Refaire le test de charge sur le serveur du client : le ProLiant
    ML330 G6 n'a pas de SSD et les durees y seront moins bonnes que dans
    l'environnement de developpement.

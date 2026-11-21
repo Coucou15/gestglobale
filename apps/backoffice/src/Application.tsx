@@ -6,6 +6,7 @@ import { TableauDeBord } from './pages/TableauDeBord';
 import { Articles } from './pages/Articles';
 import { Stocks } from './pages/Stocks';
 import { Achats } from './pages/Achats';
+import { Documents } from './pages/Documents';
 import { Inventaires } from './pages/Inventaires';
 import { Caisses } from './pages/Caisses';
 import { Tiers } from './pages/Tiers';
@@ -26,6 +27,7 @@ const ENTREES = [
   { chemin: '/', libelle: 'Tableau de bord', droit: null },
   { chemin: '/articles', libelle: 'Articles', droit: 'article.voir' },
   { chemin: '/stocks', libelle: 'Stocks', droit: 'stock.voir' },
+  { chemin: '/documents', libelle: 'Factures et BL', droit: 'rapport.son_magasin' },
   { chemin: '/achats', libelle: 'Receptions', droit: 'achat.voir' },
   { chemin: '/inventaires', libelle: 'Inventaires', droit: 'stock.inventaire_saisir' },
   { chemin: '/caisses', libelle: 'Caisses', droit: 'rapport.son_magasin' },
@@ -124,6 +126,7 @@ export function Application() {
           {([
             ['/articles', 'article.voir', <Articles utilisateur={utilisateur} />],
             ['/stocks', 'stock.voir', <Stocks />],
+            ['/documents', 'rapport.son_magasin', <Documents utilisateur={utilisateur} />],
             ['/achats', 'achat.voir', <Achats utilisateur={utilisateur} />],
             ['/inventaires', 'stock.inventaire_saisir', <Inventaires utilisateur={utilisateur} />],
             ['/caisses', 'rapport.son_magasin', <Caisses />],
