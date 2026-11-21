@@ -7,6 +7,12 @@ import { contextBridge, ipcRenderer } from 'electron';
  * tout passe par des canaux nommes, ce qui limite la surface exposee.
  */
 const api = {
+  configuration: () => ipcRenderer.invoke('caisse:configuration'),
+  testerServeur: (urlServeur: string) =>
+    ipcRenderer.invoke('caisse:tester-serveur', { urlServeur }),
+  enregistrerConfiguration: (saisie: unknown) =>
+    ipcRenderer.invoke('caisse:enregistrer-configuration', saisie),
+
   connexion: (code: string, pin: string) => ipcRenderer.invoke('caisse:connexion', { code, pin }),
   etatSync: () => ipcRenderer.invoke('caisse:etat-sync'),
   synchroniser: () => ipcRenderer.invoke('caisse:synchroniser'),

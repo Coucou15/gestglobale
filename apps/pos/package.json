@@ -10,20 +10,28 @@
     "dev": "concurrently \"tsc -p tsconfig.json --watch\" \"vite\"",
     "demarrer": "electron dist/principal/index.js",
     "test": "vitest run",
-    "lint": "tsc -p tsconfig.json --noEmit"
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "preparer": "electron-rebuild -f --only better-sqlite3",
+    "sonde": "pnpm preparer && (xvfb-run -a electron --no-sandbox outils/sonde-natif.js; e=$?; pnpm restaurer; exit $e)",
+    "essai": "pnpm preparer && (xvfb-run -a electron --no-sandbox outils/essai-caisse.js; e=$?; pnpm restaurer; exit $e)",
+    "empaqueter:windows": "pnpm preparer && pnpm build && (electron-builder --win --publish never; e=$?; pnpm restaurer; exit $e)",
+    "empaqueter:linux": "pnpm preparer && pnpm build && (electron-builder --linux dir --publish never; e=$?; pnpm restaurer; exit $e)",
+    "restaurer": "cd ../../node_modules/better-sqlite3 && prebuild-install --runtime node"
   },
   "dependencies": {
     "@gestglobale/shared": "workspace:*",
-    "better-sqlite3": "11.5.0",
-    "argon2": "0.41.1"
+    "argon2": "0.41.1",
+    "better-sqlite3": "11.5.0"
   },
   "devDependencies": {
+    "@electron/rebuild": "4.2.1",
     "@types/better-sqlite3": "7.6.11",
     "@types/react": "18.3.11",
     "@types/react-dom": "18.3.1",
     "@vitejs/plugin-react": "4.3.3",
     "concurrently": "9.0.1",
     "electron": "33.0.2",
+    "electron-builder": "26.18.0",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "typescript": "5.6.3",

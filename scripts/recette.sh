@@ -49,26 +49,48 @@ base_fraiche() {
   exit 1
 }
 
-couleur '1/6  Construction'
+couleur '1/7  Construction'
 ( cd "$RACINE/packages/shared" && pnpm build >/dev/null )
 ( cd "$API" && npx prisma generate >/dev/null && npx nest build >/dev/null )
 
-couleur '2/6  Noyau metier (hors base, hors reseau)'
+couleur '2/7  Noyau metier (hors base, hors reseau)'
 ( cd "$RACINE/packages/shared" && npx vitest run )
 
-couleur "3/6  Nettoyage a l'import de l'export de l'ancien logiciel"
+couleur "3/7  Nettoyage a l'import de l'export de l'ancien logiciel"
 ( cd "$API" && npx vitest run )
 
-couleur '4/6  Recette fonctionnelle du lot 1 (API + PostgreSQL)'
+couleur '4/7  Recette fonctionnelle du lot 1 (API + PostgreSQL)'
 base_fraiche
 ( cd "$API" && node test/recette-lot1.mjs )
 
-couleur '5/6  Coupure reseau de la caisse (SQLite local + API)'
+couleur '5/7  Coupure reseau de la caisse (SQLite local + API)'
 base_fraiche
 ( cd "$POS" && npx vitest run )
 
+# Les etapes Electron viennent APRES les essais sous Node, car elles
+# recompilent la base locale pour l'interface binaire d'Electron : un
+# seul binaire peut vivre dans build/Release. Celle de Node est
+# retablie a la fin, meme en cas d'echec.
+couleur '6/7  Modules natifs sous Electron'
+if command -v xvfb-run >/dev/null 2>&1; then
+  ( cd "$POS" && pnpm preparer >/dev/null 2>&1 )
+  ( cd "$POS" && xvfb-run -a npx electron --no-sandbox outils/sonde-natif.js ) || ETAT_ELECTRON=1
+
+  couleur '7/7  La caisse, de bout en bout sous Electron'
+  base_fraiche
+  ( cd "$POS" && xvfb-run -a npx electron --no-sandbox outils/essai-caisse.js ) || ETAT_ELECTRON=1
+
+  ( cd "$POS" && pnpm restaurer >/dev/null 2>&1 )
+  if [[ "${ETAT_ELECTRON:-0}" != "0" ]]; then
+    echo 'ECHEC : la caisse ne passe pas sous Electron'
+    exit 1
+  fi
+else
+  echo '  ignore : xvfb absent, controle a refaire sur un poste avec affichage'
+fi
+
 if [[ "${AVEC_CHARGE:-0}" == "1" ]]; then
-  couleur '6/6  Test de charge au volume reel'
+  couleur '8/8  Test de charge au volume reel'
   base_fraiche
   ( cd "$API" && npx ts-node -T prisma/seed-volume.ts )
   ( cd "$POS" && node test/charge.mjs )

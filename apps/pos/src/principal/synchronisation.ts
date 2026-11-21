@@ -55,6 +55,26 @@ export function clientHttpParDefaut(urlBase: string, delaiMs = 8000): ClientHttp
 }
 
 export class Synchronisation {
+  /**
+   * File d'execution des synchronisations.
+   *
+   * Deux remontees peuvent partir en meme temps : celle que declenche
+   * l'encaissement d'un ticket, et celle de la boucle periodique. Elles
+   * liraient alors la meme file et enverraient les memes elements, et
+   * surtout elles pourraient presenter un ticket avant la session a
+   * laquelle il se rattache — le serveur le refuserait, et il resterait
+   * bloque en file alors que rien ne cloche.
+   *
+   * Les synchronisations passent donc l'une apres l'autre.
+   */
+  private file: Promise<unknown> = Promise.resolve();
+
+  private enfiler<T>(action: () => Promise<T>): Promise<T> {
+    const courant = this.file.catch(() => undefined).then(action);
+    this.file = courant.catch(() => undefined);
+    return courant;
+  }
+
   constructor(
     private readonly base: Database.Database,
     private readonly config: ConfigurationCaisse,
@@ -88,6 +108,12 @@ export class Synchronisation {
    * base locale. Les pages s'enchainent tant que le serveur en annonce.
    */
   async descendre(): Promise<{ articles: number; clients: number; pages: number }> {
+    return this.enfiler(() => this.descendreMaintenant());
+  }
+
+  private async descendreMaintenant(): Promise<{
+    articles: number; clients: number; pages: number;
+  }> {
     let curseur = lireEtat(this.base, CLE_CURSEUR);
     let articles = 0;
     let clients = 0;
@@ -272,6 +298,15 @@ export class Synchronisation {
     dejaRecus: number;
     refuses: number;
   }> {
+    return this.enfiler(() => this.remonterMaintenant(limite));
+  }
+
+  private async remonterMaintenant(limite = LOT_REMONTEE): Promise<{
+    envoyes: number;
+    acceptes: number;
+    dejaRecus: number;
+    refuses: number;
+  }> {
     const elements = this.base
       .prepare(
         `SELECT id, type, reference, charge FROM file_envoi
@@ -316,7 +351,9 @@ export class Synchronisation {
       // intermediaire : on reessaie avec un lot deux fois plus petit
       // plutot que de laisser la file bloquee pour toujours.
       if (/\b413\b|entity too large/i.test(message) && limite > LOT_MINIMAL) {
-        return this.remonter(Math.max(LOT_MINIMAL, Math.floor(limite / 2)));
+        // On reste dans la meme execution : repasser par `remonter`
+        // attendrait une file dont on est soi-meme le maillon courant.
+        return this.remonterMaintenant(Math.max(LOT_MINIMAL, Math.floor(limite / 2)));
       }
 
       // Echec reseau : rien n'est retire de la file, on note la tentative.

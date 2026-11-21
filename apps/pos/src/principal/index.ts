@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
-import { join } from 'node:path';
-import { readFileSync, existsSync, writeFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { createVerify } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import { ouvrirBase, lireEtat, ecrireEtat } from './base';
@@ -32,28 +32,60 @@ function cheminConfig(): string {
   return process.env.GESTGLOBALE_CONFIG ?? join(app.getPath('userData'), 'caisse.json');
 }
 
-function chargerConfiguration(): ConfigurationFichier {
+/**
+ * Lit la configuration du poste, ou rend null a la premiere installation.
+ *
+ * Une caisse neuve ne doit pas s'arreter sur une erreur : l'installateur
+ * qui en deploie trente a besoin d'un ecran, pas d'un fichier JSON a
+ * editer a la main sur chaque machine.
+ */
+function chargerConfiguration(): ConfigurationFichier | null {
   const chemin = cheminConfig();
-  if (!existsSync(chemin)) {
-    // Premiere installation : on depose un gabarit a completer par
-    // l'installateur plutot que de demarrer sur des valeurs inventees.
-    const gabarit: ConfigurationFichier = {
-      urlServeur: 'http://192.168.1.10:3000/api/v1',
-      codeMagasin: 'SV',
-      numeroCaisse: 1,
-      entete: {
-        raisonSociale: 'A completer',
-        codeMagasin: 'SV',
-        numeroCaisse: 1,
-        nomCaissier: '',
-      },
-    };
-    writeFileSync(chemin, JSON.stringify(gabarit, null, 2), 'utf8');
-    throw new Error(
-      `Configuration absente. Un gabarit a ete ecrit dans ${chemin} : completez-le puis relancez la caisse.`,
-    );
+  if (!existsSync(chemin)) return null;
+  try {
+    return JSON.parse(readFileSync(chemin, 'utf8')) as ConfigurationFichier;
+  } catch (erreur) {
+    console.error(`Configuration illisible (${chemin}) :`, erreur);
+    return null;
   }
-  return JSON.parse(readFileSync(chemin, 'utf8')) as ConfigurationFichier;
+}
+
+/** Ecrit la configuration du poste et la rend. */
+function enregistrerConfiguration(saisie: {
+  urlServeur: string;
+  codeMagasin: string;
+  numeroCaisse: number;
+  raisonSociale: string;
+  adresse?: string;
+  telephone?: string;
+  rc?: string;
+  nif?: string;
+  nis?: string;
+  articleImposition?: string;
+  imprimante?: string;
+}): ConfigurationFichier {
+  const url = saisie.urlServeur.trim().replace(/\/+$/, '');
+  const nouvelle: ConfigurationFichier = {
+    urlServeur: url,
+    codeMagasin: saisie.codeMagasin.trim().toUpperCase(),
+    numeroCaisse: saisie.numeroCaisse,
+    ...(saisie.imprimante ? { imprimante: { peripherique: saisie.imprimante.trim() } } : {}),
+    entete: {
+      raisonSociale: saisie.raisonSociale.trim(),
+      adresse: saisie.adresse?.trim() || undefined,
+      telephone: saisie.telephone?.trim() || undefined,
+      rc: saisie.rc?.trim() || undefined,
+      nif: saisie.nif?.trim() || undefined,
+      nis: saisie.nis?.trim() || undefined,
+      articleImposition: saisie.articleImposition?.trim() || undefined,
+      codeMagasin: saisie.codeMagasin.trim().toUpperCase(),
+      numeroCaisse: saisie.numeroCaisse,
+      nomCaissier: '',
+    },
+  };
+  mkdirSync(dirname(cheminConfig()), { recursive: true });
+  writeFileSync(cheminConfig(), JSON.stringify(nouvelle, null, 2), 'utf8');
+  return nouvelle;
 }
 
 function timbre(): ParametrageTimbre | undefined {
@@ -111,24 +143,95 @@ function demarrerBoucleSync(fenetre: BrowserWindow): void {
 
 function enregistrerCanaux(fenetre: BrowserWindow): void {
   ipcMain.handle('caisse:connexion', async (_evenement, { code, pin }) => {
-    // Hors ligne, la caisse authentifie sur l'empreinte descendue : c'est
-    // ce qui permet de prendre son poste sans reseau.
+    const poste = `${config.codeMagasin}-${config.numeroCaisse}`;
+    const compterUtilisateurs = () =>
+      (base.prepare('SELECT COUNT(*) AS n FROM utilisateur').get() as { n: number }).n;
+
+    /**
+     * Mise en service.
+     *
+     * Une caisse neuve n'a aucun utilisateur en base locale : ils
+     * arrivent par la descente, qui exige un jeton, qui exige une
+     * authentification. Sans passer par le serveur, une caisse qui sort
+     * du carton ne pourrait donc jamais demarrer.
+     *
+     * On interroge donc toujours le serveur en premier. Son refus n'est
+     * pas bloquant si la caisse connait deja l'utilisateur : c'est le
+     * fonctionnement hors ligne, qui n'a de sens qu'une fois le poste
+     * mis en service.
+     */
+    let reponseServeur: { jeton: string; utilisateur: { id: string; nom: string } } | null = null;
+    let serveurJoignable = false;
+    try {
+      const reponse = await fetch(`${config.urlServeur}/auth/connexion-pin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, pin, poste }),
+        signal: AbortSignal.timeout(8000),
+      });
+      serveurJoignable = reponse.status !== 0;
+      if (reponse.ok) {
+        reponseServeur = (await reponse.json()) as typeof reponseServeur;
+        ecrireEtat(base, CLE_JETON, reponseServeur!.jeton);
+      } else if (reponse.status === 401 || reponse.status === 403) {
+        // Le serveur a tranche : inutile de retomber sur la copie locale,
+        // qui pourrait etre perimee et accepter un compte desactive.
+        const corps = (await reponse.json().catch(() => ({}))) as { message?: string };
+        return { ok: false, message: corps.message ?? 'Code ou PIN incorrect' };
+      }
+    } catch {
+      // Serveur injoignable : on poursuit hors ligne.
+      serveurJoignable = false;
+    }
+
+    // Premiere mise en service : les utilisateurs et le catalogue
+    // descendent maintenant, avec le jeton qu'on vient d'obtenir.
+    if (reponseServeur && compterUtilisateurs() === 0) {
+      try {
+        await sync.descendre();
+      } catch (erreur) {
+        console.error('Descente initiale incomplete :', erreur);
+      }
+    }
+
     const utilisateur = base
       .prepare('SELECT * FROM utilisateur WHERE code = ? AND actif = 1')
       .get(code) as
       | { id: string; nom: string; empreinte_pin: string; permissions: string }
       | undefined;
 
-    if (!utilisateur) return { ok: false, message: 'Code inconnu' };
-
-    let correct = false;
-    try {
-      const argon2 = await import('argon2');
-      correct = await argon2.verify(utilisateur.empreinte_pin, pin);
-    } catch {
-      correct = false;
+    if (!utilisateur) {
+      if (!serveurJoignable && compterUtilisateurs() === 0) {
+        return {
+          ok: false,
+          message:
+            'Premiere mise en service : le serveur doit etre joignable une fois, ' +
+            'le temps de recuperer le catalogue et les utilisateurs.',
+        };
+      }
+      if (reponseServeur) {
+        // Le serveur a reconnu l'utilisateur mais la descente n'a rien
+        // rapporte : on refuse plutot que d'ouvrir une caisse sans droits.
+        return {
+          ok: false,
+          message: 'Utilisateur reconnu, mais le catalogue n\u2019a pas pu etre recupere.',
+        };
+      }
+      return { ok: false, message: 'Code inconnu' };
     }
-    if (!correct) return { ok: false, message: 'Code ou PIN incorrect' };
+
+    // Hors ligne, l'empreinte descendue fait foi. En ligne, le serveur a
+    // deja tranche : on ne redemande pas la meme preuve deux fois.
+    if (!reponseServeur) {
+      let correct = false;
+      try {
+        const argon2 = await import('argon2');
+        correct = await argon2.verify(utilisateur.empreinte_pin, pin);
+      } catch {
+        correct = false;
+      }
+      if (!correct) return { ok: false, message: 'Code ou PIN incorrect' };
+    }
 
     utilisateurCourant = {
       id: utilisateur.id,
@@ -136,22 +239,12 @@ function enregistrerCanaux(fenetre: BrowserWindow): void {
       permissions: JSON.parse(utilisateur.permissions) as string[],
     };
 
-    // En ligne, on obtient aussi un jeton serveur pour la synchronisation.
-    try {
-      const reponse = await fetch(`${config.urlServeur}/auth/connexion-pin`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code, pin, poste: `${config.codeMagasin}-${config.numeroCaisse}` }),
-      });
-      if (reponse.ok) {
-        const donnees = (await reponse.json()) as { jeton: string };
-        ecrireEtat(base, CLE_JETON, donnees.jeton);
-      }
-    } catch {
-      // Sans reseau on garde le jeton precedent ; il resservira au retour.
-    }
-
-    return { ok: true, utilisateur: utilisateurCourant, plafondRemise: plafondRemise() };
+    return {
+      ok: true,
+      utilisateur: utilisateurCourant,
+      plafondRemise: plafondRemise(),
+      horsLigne: !reponseServeur,
+    };
   });
 
   ipcMain.handle('caisse:etat-sync', () => ({
@@ -350,8 +443,8 @@ function creerFenetre(): BrowserWindow {
   return fenetre;
 }
 
-void app.whenReady().then(() => {
-  config = chargerConfiguration();
+/** Ouvre la base locale et la synchronisation pour la configuration donnee. */
+function initialiser(fenetre: BrowserWindow): void {
   base = ouvrirBase(
     config.cheminBase ?? join(app.getPath('userData'), 'donnees', 'caisse.db'),
   );
@@ -364,10 +457,61 @@ void app.whenReady().then(() => {
     },
     clientHttpParDefaut(config.urlServeur),
   );
-
-  const fenetre = creerFenetre();
-  enregistrerCanaux(fenetre);
   demarrerBoucleSync(fenetre);
+}
+
+void app.whenReady().then(() => {
+  const chargee = chargerConfiguration();
+  const fenetre = creerFenetre();
+
+  // Les canaux de configuration existent avant tout : c'est par eux que
+  // passe la premiere installation.
+  ipcMain.handle('caisse:configuration', () =>
+    config
+      ? {
+          configuree: true,
+          urlServeur: config.urlServeur,
+          codeMagasin: config.codeMagasin,
+          numeroCaisse: config.numeroCaisse,
+          entete: config.entete,
+          chemin: cheminConfig(),
+        }
+      : { configuree: false, chemin: cheminConfig() },
+  );
+
+  ipcMain.handle('caisse:tester-serveur', async (_evenement, { urlServeur }) => {
+    try {
+      const reponse = await fetch(`${String(urlServeur).replace(/\/+$/, '')}/auth/moi`, {
+        signal: AbortSignal.timeout(6000),
+      });
+      // 401 est la bonne reponse : le serveur repond et refuse un appel
+      // sans jeton, ce qui prouve qu'il s'agit bien de GestGlobale.
+      return reponse.status === 401
+        ? { joignable: true }
+        : { joignable: false, message: `Reponse inattendue du serveur (${reponse.status})` };
+    } catch (erreur) {
+      return {
+        joignable: false,
+        message:
+          erreur instanceof Error && erreur.name === 'TimeoutError'
+            ? 'Le serveur ne repond pas dans le delai imparti'
+            : 'Serveur injoignable : verifiez l\u2019adresse et le reseau',
+      };
+    }
+  });
+
+  ipcMain.handle('caisse:enregistrer-configuration', (_evenement, saisie) => {
+    config = enregistrerConfiguration(saisie);
+    initialiser(fenetre);
+    enregistrerCanaux(fenetre);
+    return { configuree: true };
+  });
+
+  if (chargee) {
+    config = chargee;
+    initialiser(fenetre);
+    enregistrerCanaux(fenetre);
+  }
 
   void lireEtat;
 });

@@ -11,3 +11,4 @@ apps/pos/data/
 apps/api/uploads/
 release/
 /tmp/
+apps/pos/release/

@@ -4,8 +4,12 @@ import { Connexion } from './Connexion';
 import { OuvertureSession } from './OuvertureSession';
 import { EcranVente } from './EcranVente';
 import { Cloture } from './Cloture';
+import { Configuration } from './Configuration';
 
 export function Application() {
+  const [configuration, setConfiguration] = useState<
+    { configuree: boolean; chemin: string } | null
+  >(null);
   const [utilisateur, setUtilisateur] = useState<UtilisateurCaisse | null>(null);
   const [plafondRemise, setPlafondRemise] = useState(0);
   const [session, setSession] = useState<{ numero: string } | null>(null);
@@ -16,15 +20,37 @@ export function Application() {
     setSession(await caisse().sessionCourante());
   }, []);
 
+  // La configuration du poste conditionne tout le reste : sans elle, la
+  // caisse n'a ni base locale ni serveur a joindre.
   useEffect(() => {
+    void (window as unknown as {
+      caisse: { configuration(): Promise<{ configuree: boolean; chemin: string }> };
+    }).caisse.configuration().then(setConfiguration);
+  }, []);
+
+  useEffect(() => {
+    if (!configuration?.configuree) return;
     void caisse().etatSync().then(setEtatSync);
     const arreter = caisse().surEtatSync(setEtatSync);
     return arreter;
-  }, []);
+  }, [configuration]);
 
   useEffect(() => {
     if (utilisateur) void rafraichirSession();
   }, [utilisateur, rafraichirSession]);
+
+  if (!configuration) {
+    return <div className="centre discret">Demarrage de la caisse...</div>;
+  }
+
+  if (!configuration.configuree) {
+    return (
+      <Configuration
+        chemin={configuration.chemin}
+        surTermine={() => setConfiguration({ configuree: true, chemin: configuration.chemin })}
+      />
+    );
+  }
 
   if (!utilisateur) {
     return (

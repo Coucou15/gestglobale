@@ -56,8 +56,12 @@ douchette : la reception naît en brouillon, et la fenetre de validation
 montre le CUMP avant et le prix de vente propose avant de s'engager.
 **Reste** : l'envoi du bon de commande par courriel ou WhatsApp en PDF.
 
-**M4 — Caisse.** Voir le README. **Reste** : mise en attente de tickets,
-touches rapides parametrables, afficheur client, et l'empaquetage Windows.
+**M4 — Caisse.** Voir le README. L'application est empaquetee : ecran
+d'installation du poste, installateur unique, base locale recompilee pour
+Electron. Eprouvee de bout en bout sous Electron, d'un poste vierge
+jusqu'au ticket remonte. **Reste** : executer l'installateur sur une vraie
+machine Windows, signer le code, fournir l'icone ; puis mise en attente de
+tickets, touches rapides parametrables et afficheur client.
 
 **M5 — Ventes.** Tickets, retours, annulations par contre-ecriture, ventes
 a credit avec plafond. Factures, bons de livraison, proformas et avoirs
@@ -166,8 +170,9 @@ continuer, mais chacun changera du code s'il est tranche plus tard.
 1. Faire corriger par le client les 115 lignes bloquantes du rapport
    d'import, puis comparer les trois totaux avec l'ancien logiciel.
    Voir [`rapport-import-VENTES_2026.md`](rapport-import-VENTES_2026.md).
-2. Empaqueter la caisse pour Windows et l'installer sur un poste reel avec
-   sa douchette, son imprimante et son tiroir.
+2. Executer l'installateur sur une vraie machine Windows, avec sa
+   douchette, son imprimante et son tiroir. Voir
+   [`installer-la-caisse.md`](installer-la-caisse.md).
 3. Ajouter une generation PDF cote serveur, pour envoyer les factures par
    courriel sans intervention humaine.
 4. Refaire le test de charge sur le serveur du client : le ProLiant

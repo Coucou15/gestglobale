@@ -1,0 +1,63 @@
+# Empaquetage de la caisse GestGlobale.
+#
+# Cible principale : Windows 10 et 11, installateur unique fourni au
+# client (section 5 du cahier des charges). La cible Linux sert aux
+# essais et au cas ou un poste tournerait sous Linux, ce que la section 8
+# autorise.
+
+appId: dz.gestglobale.caisse
+productName: GestGlobale Caisse
+copyright: GestGlobale
+
+# Sans cela, le nom du paquet (@gestglobale/pos) donnerait un executable
+# nomme « @gestglobalepos », impossible a lancer et incomprehensible pour
+# l'installateur.
+executableName: gestglobale-caisse
+
+directories:
+  output: release
+  buildResources: ressources
+
+# Le code compile et l'interface construite ; les sources restent dehors.
+files:
+  - dist/**/*
+  - package.json
+  - '!**/*.map'
+  - '!outils/**'
+
+# Les modules natifs ne peuvent pas etre lus depuis une archive asar :
+# ils doivent rester des fichiers sur le disque.
+asar: true
+asarUnpack:
+  - '**/*.node'
+  - node_modules/better-sqlite3/**
+  - node_modules/argon2/**
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  # Une caisse n'a pas besoin d'elevation pour vendre ; l'installateur,
+  # lui, s'installe pour tous les utilisateurs du poste.
+  requestedExecutionLevel: asInvoker
+
+nsis:
+  oneClick: false
+  perMachine: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Caisse GestGlobale
+  installerLanguages: [fr_FR]
+  language: '1036'
+  # L'installateur ne supprime jamais les donnees du poste : la base
+  # locale peut contenir des tickets pas encore remontes.
+  deleteAppDataOnUninstall: false
+
+linux:
+  target: [dir]
+  category: Office
+
+# Les modules natifs sont deja recompiles pour Electron par le script
+# `pnpm preparer` ; electron-builder ne doit pas les reconstruire.
+npmRebuild: false

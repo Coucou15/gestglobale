@@ -77,17 +77,28 @@ Gerant : `gerant` / `GestGlobale2026!`. Caisse : code `3`, PIN `1234`.
 ### Caisse
 
 ```bash
-pnpm --filter @gestglobale/pos build
+pnpm --filter @gestglobale/pos preparer
 ```
 
-Au premier lancement, la caisse ecrit un gabarit de configuration dans le
-dossier de donnees de l'application et s'arrete : completez-le avec
-l'adresse du serveur, le code du magasin et le numero de caisse, puis
-relancez.
+Recompile la base locale SQLite pour Electron. **Obligatoire** : un module
+natif compile pour Node ne se charge pas dans Electron.
+
+```bash
+pnpm --filter @gestglobale/pos build
+```
 
 ```bash
 pnpm --filter @gestglobale/pos demarrer
 ```
+
+Au premier lancement, la caisse affiche son ecran d'installation :
+adresse du serveur, code du magasin, numero de caisse et mentions du
+ticket. La premiere connexion d'un caissier doit se faire serveur
+joignable — c'est elle qui rapporte le catalogue et les droits ; ensuite
+la caisse vend sans reseau.
+
+Pour fabriquer l'installateur Windows et mettre un poste en service, voir
+[`docs/installer-la-caisse.md`](docs/installer-la-caisse.md).
 
 ---
 
@@ -306,10 +317,10 @@ ligne produisent exactement les memes ecritures.
 L'etat detaille, module par module, est dans
 [`docs/etat-du-projet.md`](docs/etat-du-projet.md).
 
-En resume : le lot 1 est complet et verifie. Restent l'empaquetage
-Windows de la caisse, la generation PDF cote serveur pour l'envoi par
-courriel, puis les lots 2 et 3 (fidelite, multi-magasins, comptabilite,
-personnel).
+En resume : le lot 1 est complet et verifie, caisse empaquetee comprise.
+Restent l'execution de l'installateur sur une vraie machine Windows, sa
+signature, la generation PDF cote serveur pour l'envoi par courriel, puis
+les lots 2 et 3 (fidelite, multi-magasins, comptabilite, personnel).
 
 Plusieurs points demandent une decision de votre part avant d'aller plus
 loin ; ils sont listes a la fin du meme document.
