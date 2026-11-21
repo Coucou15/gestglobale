@@ -225,8 +225,8 @@ export class Synchronisation {
       const majPromotion = this.base.prepare(
         `INSERT INTO promotion (id, libelle, type, debut, fin, article_id, famille_id,
             valeur_centimes, remise_pourcent, quantite_declenchement, quantite_offerte,
-            heure_debut, heure_fin)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+            heure_debut, heure_fin, cumulable)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
          ON CONFLICT(id) DO UPDATE SET
             libelle=excluded.libelle, type=excluded.type, debut=excluded.debut,
             fin=excluded.fin, article_id=excluded.article_id, famille_id=excluded.famille_id,
@@ -239,7 +239,7 @@ export class Synchronisation {
         majPromotion.run(
           p.id, p.libelle, p.type, p.debut, p.fin, p.articleId, p.familleId,
           p.valeurCentimes, p.remisePourcent, p.quantiteDeclenchement, p.quantiteOfferte,
-          p.heureDebut, p.heureFin,
+          p.heureDebut, p.heureFin, p.cumulable ? 1 : 0,
         );
       }
 

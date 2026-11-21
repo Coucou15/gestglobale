@@ -237,6 +237,7 @@ export class SyncService {
         quantiteOfferte: p.quantiteOfferte,
         heureDebut: p.heureDebut,
         heureFin: p.heureFin,
+        cumulable: p.cumulable,
       })),
       utilisateurs: utilisateurs.map((u): UtilisateurSync => ({
         id: u.id,

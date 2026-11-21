@@ -29,8 +29,22 @@ arreter() {
 }
 trap arreter EXIT
 
+# Un serveur laisse tourner d'une session de travail precedente servirait
+# une base que la recette croit fraiche : les suites echoueraient pour une
+# raison qui n'a rien a voir avec le code. On fait donc place nette.
+liberer_le_port() {
+  local restes
+  restes="$(pgrep -f 'node dist/main.js' || true)"
+  if [[ -n "$restes" ]]; then
+    echo "  un serveur tournait deja : il est arrete"
+    kill $restes 2>/dev/null || true
+    sleep 1
+  fi
+}
+
 base_fraiche() {
   arreter
+  liberer_le_port
   ( cd "$API" && npx prisma migrate reset --force --skip-seed --skip-generate >/dev/null )
   ( cd "$API" && npx ts-node -T prisma/seed.ts >/dev/null )
   ( cd "$API" && node dist/main.js >"$JOURNAL" 2>&1 & echo $! > /tmp/gestglobale.pid )
@@ -48,6 +62,8 @@ base_fraiche() {
   tail -30 "$JOURNAL" >&2
   exit 1
 }
+
+liberer_le_port
 
 couleur '1/7  Construction'
 ( cd "$RACINE/packages/shared" && pnpm build >/dev/null )

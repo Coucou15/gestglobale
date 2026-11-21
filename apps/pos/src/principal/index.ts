@@ -6,6 +6,8 @@ import type Database from 'better-sqlite3';
 import { ouvrirBase, lireEtat, ecrireEtat } from './base';
 import { chercherParCode, chercherParTexte } from './catalogue';
 import { encaisser, controlerCredit, type Panier, type ReglementSaisi } from './vente';
+import { avantagesPour, promotionsEnCours } from './promotionsLocales';
+import { articleParId } from './catalogue';
 import {
   ouvrirSession, sessionOuverte, previsualiserCloture, cloturerSession,
 } from './session';
@@ -288,6 +290,25 @@ function enregistrerCanaux(fenetre: BrowserWindow): void {
   });
 
   ipcMain.handle('caisse:chercher-code', (_e, { code }) => chercherParCode(base, code));
+
+  /**
+   * Avantages promotionnels d'une ligne.
+   *
+   * Appele a chaque changement de quantite : un « trois pour deux » ne se
+   * declenche qu'au troisieme article et doit disparaitre si le caissier
+   * revient a deux. Le calcul se fait sur la base locale, donc sans
+   * reseau.
+   */
+  ipcMain.handle(
+    'caisse:promotions-ligne',
+    (_e, { articleId, quantiteMilli, prixUnitaireCentimes }) => {
+      const article = articleParId(base, articleId);
+      if (!article) return [];
+      return avantagesPour(base, article, quantiteMilli, prixUnitaireCentimes);
+    },
+  );
+
+  ipcMain.handle('caisse:promotions-en-cours', () => promotionsEnCours(base));
   ipcMain.handle('caisse:chercher-texte', (_e, { texte }) => chercherParTexte(base, texte));
 
   ipcMain.handle('caisse:chercher-client', (_e, { texte }) => {

@@ -13,7 +13,17 @@ export interface ArticleCaisse {
   packNbUnites: number | null;
   estVrac: boolean;
   venteAutorisee: boolean;
+  familleId: string | null;
   stockSvMilli: number;
+}
+
+export interface AvantagePromotion {
+  promotionId: string;
+  libelle: string;
+  type: string;
+  remiseCentimes: number;
+  prixUnitaireCentimes: number | null;
+  unitesOffertesMilli: number;
 }
 
 export interface ResultatCode {
@@ -67,6 +77,10 @@ interface ApiCaisse {
   }>;
   cloturer(comptage: unknown, justification: string): Promise<{ ecartCentimes: number }>;
   chercherCode(code: string): Promise<ResultatCode | null>;
+  promotionsLigne(
+    articleId: string, quantiteMilli: number, prixUnitaireCentimes: number,
+  ): Promise<AvantagePromotion[]>;
+  promotionsEnCours(): Promise<unknown[]>;
   chercherTexte(texte: string): Promise<ArticleCaisse[]>;
   chercherClient(texte: string): Promise<ClientCaisse[]>;
   controlerCredit(clientId: string, montantCentimes: number): Promise<{

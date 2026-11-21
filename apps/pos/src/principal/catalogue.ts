@@ -19,6 +19,7 @@ export interface ArticleLocal {
   packNbUnites: number | null;
   estVrac: boolean;
   venteAutorisee: boolean;
+  familleId: string | null;
   stockSvMilli: number;
 }
 
@@ -40,6 +41,7 @@ interface LigneArticle {
   pack_nb_unites: number | null;
   est_vrac: number;
   vente_autorisee: number;
+  famille_id: string | null;
   stock_sv_milli: number;
 }
 
@@ -62,6 +64,7 @@ function versArticle(ligne: LigneArticle): ArticleLocal {
     packNbUnites: ligne.pack_nb_unites,
     estVrac: ligne.est_vrac === 1,
     venteAutorisee: ligne.vente_autorisee === 1,
+    familleId: ligne.famille_id,
     stockSvMilli: ligne.stock_sv_milli,
   };
 }

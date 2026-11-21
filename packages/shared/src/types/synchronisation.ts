@@ -117,6 +117,7 @@ export interface PromotionSync {
   quantiteOfferte: number | null;
   heureDebut: string | null;
   heureFin: string | null;
+  cumulable: boolean;
 }
 
 export interface UtilisateurSync {

@@ -26,6 +26,11 @@ const api = {
     ipcRenderer.invoke('caisse:cloturer', { comptage, justification }),
 
   chercherCode: (code: string) => ipcRenderer.invoke('caisse:chercher-code', { code }),
+  promotionsLigne: (articleId: string, quantiteMilli: number, prixUnitaireCentimes: number) =>
+    ipcRenderer.invoke('caisse:promotions-ligne', {
+      articleId, quantiteMilli, prixUnitaireCentimes,
+    }),
+  promotionsEnCours: () => ipcRenderer.invoke('caisse:promotions-en-cours'),
   chercherTexte: (texte: string) => ipcRenderer.invoke('caisse:chercher-texte', { texte }),
   chercherClient: (texte: string) => ipcRenderer.invoke('caisse:chercher-client', { texte }),
   controlerCredit: (clientId: string, montantCentimes: number) =>

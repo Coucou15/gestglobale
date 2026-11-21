@@ -24,7 +24,7 @@ a venir = non commence.
 | M7 | Tresorerie | 1 | **fait** — depenses, salaires, apports, retraits et transferts a double validation |
 | M8 | Utilisateurs et droits | 1 | **fait** |
 | M9 | Tableaux de bord et rapports | 2 | *partiel* — chiffres du jour, rapport de periode, top et flop produits, produits dormants, ecarts de caisse, stocks negatifs ; exports Excel et PDF et resume quotidien a faire |
-| M10 | Fidelite et promotions | 2 | *partiel* — modele de donnees et descente vers la caisse faits ; application en vente a faire |
+| M10 | Fidelite et promotions | 2 | *partiel* — promotions appliquees en caisse, hors ligne comprise, et gerees au back-office ; cartes cadeaux et bons d'achat a faire |
 | M11 | Multi-magasins | 2 | *partiel* — catalogue central, prix par magasin et transferts faits ; consolidation a completer |
 | M12 | Comptabilite et exports | 3 | *partiel* — historique de l'ancien logiciel repris et consultable ; journaux et etats fiscaux a faire |
 | M13 | Gestion du personnel | 3 | *partiel* — modele de donnees complet ; fonctionnalites a faire |

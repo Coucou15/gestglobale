@@ -10,6 +10,14 @@ import { formaterDA, formaterQuantite, type UniteMesure, type TicketSync } from 
 
 const LARGEUR = 42; // colonnes d'une 80 mm en police A
 
+/** Avantage promotionnel a faire figurer sous une ligne du ticket. */
+export interface AvantageTicket {
+  numeroLigne: number;
+  libelle: string;
+  remiseCentimes: number;
+  unitesOffertesMilli: number;
+}
+
 export interface EnteteTicket {
   raisonSociale: string;
   adresse?: string;
@@ -40,7 +48,13 @@ const SEPARATEUR = '-'.repeat(LARGEUR);
 export function composerTicket(
   ticket: TicketSync,
   entete: EnteteTicket,
-  options: { unites?: Record<string, UniteMesure>; nomClient?: string | null } = {},
+  options: {
+    unites?: Record<string, UniteMesure>;
+    nomClient?: string | null;
+    avantages?: AvantageTicket[];
+    pointsGagnes?: number;
+    pointsTotal?: number;
+  } = {},
 ): string {
   const lignes: string[] = [];
 
@@ -77,6 +91,14 @@ export function composerTicket(
         ),
       );
     }
+    // Le client doit voir ce que la promotion lui a fait gagner.
+    for (const avantage of options.avantages ?? []) {
+      if (avantage.numeroLigne !== ligne.numeroLigne) continue;
+      const gain = avantage.unitesOffertesMilli > 0
+        ? `${avantage.unitesOffertesMilli / 1000} offert(s)`
+        : `-${formaterDA(avantage.remiseCentimes, { devise: false })}`;
+      lignes.push(deuxColonnes(`  * ${avantage.libelle}`, gain));
+    }
   }
 
   lignes.push(SEPARATEUR);
@@ -98,6 +120,17 @@ export function composerTicket(
   }
   if (ticket.renduCentimes > 0) {
     lignes.push(deuxColonnes('Rendu', formaterDA(ticket.renduCentimes, { devise: false })));
+  }
+
+  // Fidelite : le solde figure au ticket (M10).
+  if ((options.pointsGagnes ?? 0) > 0 || (options.pointsTotal ?? 0) > 0) {
+    lignes.push(SEPARATEUR);
+    if ((options.pointsGagnes ?? 0) > 0) {
+      lignes.push(deuxColonnes('Points gagnes', String(options.pointsGagnes)));
+    }
+    if ((options.pointsTotal ?? 0) > 0) {
+      lignes.push(deuxColonnes('Solde de points', String(options.pointsTotal)));
+    }
   }
 
   lignes.push(SEPARATEUR);

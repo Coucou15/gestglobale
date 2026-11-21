@@ -137,6 +137,34 @@ async function principal() {
   etape('Le rendu de monnaie est juste', vente?.renduCentimes === 50000,
     `${(vente?.renduCentimes ?? 0) / 100} DA`);
 
+  // --- Promotions (M10) -------------------------------------------
+  const promos = await js(`window.caisse.promotionsEnCours()`);
+  etape('Les promotions descendent jusqu\u2019a la caisse', promos.length >= 4,
+    `${promos.length} promotion(s)`);
+
+  const prixBarre = await js(`(async () => {
+    const t = await window.caisse.chercherCode('6130000000017');
+    return window.caisse.promotionsLigne(t.article.id, 1000, t.prixUnitaireCentimes);
+  })()`);
+  etape('Un prix barre s\u2019applique hors ligne',
+    prixBarre.length === 1 && prixBarre[0].prixUnitaireCentimes === 69000,
+    prixBarre[0]?.libelle ?? 'aucune');
+
+  const deuxLaits = await js(`(async () => {
+    const t = await window.caisse.chercherCode('6130000000048');
+    return window.caisse.promotionsLigne(t.article.id, 2000, t.prixUnitaireCentimes);
+  })()`);
+  etape('Deux laits ne declenchent pas le « trois pour deux »',
+    deuxLaits.filter((a) => a.type === 'X_POUR_Y').length === 0);
+
+  const troisLaits = await js(`(async () => {
+    const t = await window.caisse.chercherCode('6130000000048');
+    return window.caisse.promotionsLigne(t.article.id, 3000, t.prixUnitaireCentimes);
+  })()`);
+  const offert = troisLaits.find((a) => a.type === 'X_POUR_Y');
+  etape('Trois laits en offrent un', offert?.unitesOffertesMilli === 1000,
+    offert ? `${offert.unitesOffertesMilli / 1000} offert(s)` : 'aucune');
+
   const impression = await js(`window.caisse.imprimer('${vente?.ticket?.numero}')`);
   etape('Le ticket se compose avec ses mentions legales',
     typeof impression?.texte === 'string' && impression.texte.includes('16/00-0000000 B 00'));

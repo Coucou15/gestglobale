@@ -99,8 +99,10 @@ export function creerSchema(base: Database.Database): void {
       quantite_declenchement INTEGER,
       quantite_offerte       INTEGER,
       heure_debut            TEXT,
-      heure_fin              TEXT
+      heure_fin              TEXT,
+      cumulable              INTEGER NOT NULL DEFAULT 0
     );
+    CREATE INDEX IF NOT EXISTS idx_promotion_periode ON promotion(debut, fin);
 
     -- Les droits descendent avec les utilisateurs : la caisse authentifie
     -- et autorise seule pendant une coupure.

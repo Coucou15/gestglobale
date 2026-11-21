@@ -308,6 +308,54 @@ async function main(): Promise<void> {
     },
   });
 
+  // --- Promotions (M10) ---------------------------------------------------
+  // Une de chaque sorte, pour que la caisse soit eprouvee sur les quatre.
+  const debutPromo = new Date();
+  debutPromo.setDate(debutPromo.getDate() - 1);
+  const finPromo = new Date();
+  finPromo.setDate(finPromo.getDate() + 30);
+
+  await prisma.promotion.createMany({
+    data: [
+      {
+        code: 'PROMO-HUILE', libelle: 'Huile a 690 DA', type: 'PRIX_BARRE',
+        debut: debutPromo, fin: finPromo,
+        articleId: creees.get('ART0001') as string,
+        valeurCentimes: BigInt(69000), cumulable: false,
+      },
+      {
+        code: 'PROMO-LAIT', libelle: 'Deux laits achetes, un offert', type: 'X_POUR_Y',
+        debut: debutPromo, fin: finPromo,
+        articleId: creees.get('ART0003') as string,
+        quantiteDeclenchement: 2, quantiteOfferte: 1, cumulable: false,
+      },
+      {
+        code: 'PROMO-FRUITS', libelle: 'Fruits et legumes a -10 %', type: 'REMISE_FAMILLE',
+        debut: debutPromo, fin: finPromo,
+        familleId: familleFruits.id, remisePourcent: 10, cumulable: false,
+      },
+      {
+        code: 'PROMO-SOIR', libelle: 'Happy hour du soir', type: 'HAPPY_HOUR',
+        debut: debutPromo, fin: finPromo,
+        familleId: familleLaitiers.id, remisePourcent: 5,
+        heureDebut: '18:00', heureFin: '20:00', cumulable: true,
+      },
+    ],
+  });
+
+  await prisma.parametre.create({
+    data: {
+      cle: 'caisse.fidelite',
+      valeur: {
+        actif: true,
+        centimesParPoint: 10000,
+        valeurPointCentimes: 100,
+        minimumUtilisation: 50,
+      },
+      description: 'Bareme de fidelite : un point par 100 DA depenses (M10)',
+    },
+  });
+
   // --- Tiers -------------------------------------------------------------
   await prisma.tiers.createMany({
     data: [
@@ -345,6 +393,7 @@ Jeu de donnees cree.
   Caisses        : 2 et 3
   Utilisateurs   : ${comptes.length} (codes 1 a 11)
   Articles       : ${articles.length} + 1 pack
+  Promotions     : 4 (prix barre, X pour Y, remise famille, happy hour)
   Gerant         : login "gerant", mot de passe "${MOT_DE_PASSE_DEMO}"
   Caisse         : code "3", PIN "${PIN_DEMO}"
 

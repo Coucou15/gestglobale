@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import { compteurSuivant } from './base';
+import { avantagesPour, type AvantageApplique } from './promotionsLocales';
 import { articleParId, prixSelonCategorie, type ArticleLocal } from './catalogue';
 import {
   totauxDocument, calculerTimbre, numeroDocument, evaluerCredit,
@@ -18,6 +19,51 @@ export interface LignePanier {
   annulee: boolean;
   autoriseeParId: string | null;
   promotionId: string | null;
+  /** Avantages promotionnels retenus pour cette ligne, pour le ticket. */
+  avantages?: AvantageApplique[];
+}
+
+/**
+ * Applique les promotions en cours a une ligne du panier.
+ *
+ * A rejouer apres toute modification de la quantite : un « trois pour
+ * deux » ne se declenche qu'au troisieme article, et doit disparaitre si
+ * le caissier revient a deux.
+ */
+export function appliquerPromotions(
+  base: Database.Database,
+  ligne: LignePanier,
+  maintenant = new Date(),
+): LignePanier {
+  // Le prix de reference est celui du catalogue, jamais un prix deja
+  // remise : sans quoi un recalcul empilerait les remises.
+  const prixBase = ligne.article.estVrac
+    ? ligne.prixUnitaireCentimes
+    : ligne.prixUnitaireCentimes;
+
+  const avantages = avantagesPour(
+    base, ligne.article, ligne.quantiteMilli, prixBase, maintenant,
+  );
+
+  if (avantages.length === 0) {
+    ligne.avantages = [];
+    ligne.promotionId = null;
+    ligne.remiseCentimes = 0;
+    return ligne;
+  }
+
+  // Un prix barre remplace le prix affiche ; les autres avantages se
+  // traduisent en remise sur la ligne.
+  const prixBarre = avantages.find((a) => a.prixUnitaireCentimes !== null);
+  ligne.avantages = avantages;
+  ligne.promotionId = avantages[0].promotionId;
+  ligne.remiseCentimes = avantages
+    .filter((a) => a.prixUnitaireCentimes === null)
+    .reduce((t, a) => t + a.remiseCentimes, 0);
+  if (prixBarre?.prixUnitaireCentimes != null) {
+    ligne.prixUnitaireCentimes = prixBarre.prixUnitaireCentimes;
+  }
+  return ligne;
 }
 
 export interface Panier {

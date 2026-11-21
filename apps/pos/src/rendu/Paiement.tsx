@@ -8,12 +8,14 @@ interface LigneAffichee {
   article: ArticleCaisse;
   codeScanne: string | null;
   quantiteMilli: number;
+  prixCatalogueCentimes: number;
   prixUnitaireCentimes: number;
   remisePourcent: number;
   remiseCentimes: number;
   annulee: boolean;
   autoriseeParId: string | null;
   promotionId: string | null;
+  avantages: Array<{ promotionId: string; libelle: string; remiseCentimes: number }>;
 }
 
 const COUPURES = [200000, 100000, 50000, 20000, 10000, 5000, 2000, 1000, 500];

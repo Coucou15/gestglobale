@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
-  caisse, type ArticleCaisse, type ClientCaisse, type EtatSync, type UtilisateurCaisse,
+  caisse, type ArticleCaisse, type AvantagePromotion, type ClientCaisse,
+  type EtatSync, type UtilisateurCaisse,
 } from './api';
 import { Voyant } from './Application';
 import { Paiement } from './Paiement';
@@ -10,12 +11,15 @@ interface LigneAffichee {
   article: ArticleCaisse;
   codeScanne: string | null;
   quantiteMilli: number;
+  /** Prix du catalogue, avant tout prix barre : sert de reference au recalcul. */
+  prixCatalogueCentimes: number;
   prixUnitaireCentimes: number;
   remisePourcent: number;
   remiseCentimes: number;
   annulee: boolean;
   autoriseeParId: string | null;
   promotionId: string | null;
+  avantages: AvantagePromotion[];
 }
 
 function formater(centimes: number): string {
@@ -31,6 +35,29 @@ function totalLigne(l: LigneAffichee): number {
   const remise = Math.min(brut, Math.round((brut * l.remisePourcent) / 100) + l.remiseCentimes);
   const ht = brut - remise;
   return ht + Math.round((ht * l.article.tauxTva) / 100);
+}
+
+/**
+ * Recalcule les promotions d'une ligne.
+ *
+ * A rejouer a chaque changement de quantite : un « trois pour deux » ne
+ * se declenche qu'au troisieme article, et doit disparaitre si le
+ * caissier revient a deux.
+ */
+async function rafraichirPromotions(ligne: LigneAffichee): Promise<LigneAffichee> {
+  const avantages = await caisse().promotionsLigne(
+    ligne.article.id, ligne.quantiteMilli, ligne.prixCatalogueCentimes,
+  );
+  const prixBarre = avantages.find((a) => a.prixUnitaireCentimes !== null);
+  return {
+    ...ligne,
+    avantages,
+    promotionId: avantages[0]?.promotionId ?? null,
+    prixUnitaireCentimes: prixBarre?.prixUnitaireCentimes ?? ligne.prixCatalogueCentimes,
+    remiseCentimes: avantages
+      .filter((a) => a.prixUnitaireCentimes === null)
+      .reduce((t, a) => t + a.remiseCentimes, 0),
+  };
 }
 
 export function EcranVente({
@@ -75,8 +102,8 @@ export function EcranVente({
   const ajouter = (article: ArticleCaisse, quantiteMilli: number, prix: number, code: string | null) => {
     setLignes((precedentes) => {
       const cumulable = precedentes.find(
-        (l) => !l.annulee && l.article.id === article.id && l.prixUnitaireCentimes === prix
-          && !l.article.estVrac && l.remisePourcent === 0 && l.remiseCentimes === 0,
+        (l) => !l.annulee && l.article.id === article.id && l.prixCatalogueCentimes === prix
+          && !l.article.estVrac && l.remisePourcent === 0,
       );
       if (cumulable) {
         return precedentes.map((l) =>
@@ -88,12 +115,38 @@ export function EcranVente({
         {
           numeroLigne: precedentes.length + 1,
           article, codeScanne: code, quantiteMilli,
-          prixUnitaireCentimes: prix, remisePourcent: 0, remiseCentimes: 0,
-          annulee: false, autoriseeParId: null, promotionId: null,
+          prixCatalogueCentimes: prix, prixUnitaireCentimes: prix,
+          remisePourcent: 0, remiseCentimes: 0,
+          annulee: false, autoriseeParId: null, promotionId: null, avantages: [],
         },
       ];
     });
   };
+
+  // Les promotions sont recalculees des que le panier bouge.
+  useEffect(() => {
+    let vivant = true;
+    const aRecalculer = lignes.filter((l) => !l.annulee);
+    if (aRecalculer.length === 0) return;
+    void Promise.all(aRecalculer.map(rafraichirPromotions)).then((majs) => {
+      if (!vivant) return;
+      setLignes((precedentes) =>
+        precedentes.map((l) => {
+          const maj = majs.find((m) => m.numeroLigne === l.numeroLigne);
+          if (!maj) return l;
+          // On ne reecrit que si quelque chose a change, sinon la mise a
+          // jour se declencherait elle-meme sans fin.
+          const identique =
+            maj.remiseCentimes === l.remiseCentimes &&
+            maj.prixUnitaireCentimes === l.prixUnitaireCentimes &&
+            maj.avantages.length === l.avantages.length;
+          return identique ? l : maj;
+        }),
+      );
+    });
+    return () => { vivant = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lignes.map((l) => `${l.numeroLigne}:${l.quantiteMilli}:${l.annulee}`).join('|')]);
 
   const scanner = async (code: string) => {
     setMessage(null);
@@ -233,9 +286,28 @@ export function EcranVente({
                     }}
                   >
                     <td className="discret">{l.numeroLigne}</td>
-                    <td>{l.article.designation}</td>
+                    <td>
+                      {l.article.designation}
+                      {l.avantages.map((a) => (
+                        <div key={a.promotionId} style={{ fontSize: 13, color: 'var(--vert)' }}>
+                          {a.libelle}
+                          {a.unitesOffertesMilli > 0
+                            ? ` — ${a.unitesOffertesMilli / 1000} offert(s)`
+                            : ` — ${formater(a.remiseCentimes)} DA`}
+                        </div>
+                      ))}
+                    </td>
                     <td className="nombre">{formaterQte(l.quantiteMilli, l.article.decimales)}</td>
-                    <td className="nombre">{formater(l.prixUnitaireCentimes)}</td>
+                    <td className="nombre">
+                      {l.prixUnitaireCentimes !== l.prixCatalogueCentimes && (
+                        <span className="discret" style={{
+                          textDecoration: 'line-through', marginRight: 6,
+                        }}>
+                          {formater(l.prixCatalogueCentimes)}
+                        </span>
+                      )}
+                      {formater(l.prixUnitaireCentimes)}
+                    </td>
                     <td className="nombre">{l.annulee ? '—' : formater(totalLigne(l))}</td>
                   </tr>
                 ))}
@@ -260,6 +332,16 @@ export function EcranVente({
               <div className="ligne-total">
                 <span>Client</span>
                 <span>{client.nom}</span>
+              </div>
+            )}
+            {actives.some((l) => l.avantages.length > 0) && (
+              <div className="ligne-total" style={{ color: 'var(--vert)' }}>
+                <span>Promotions</span>
+                <span>
+                  -{formater(actives.reduce(
+                    (t, l) => t + l.avantages.reduce((s, a) => s + a.remiseCentimes, 0), 0,
+                  ))} DA
+                </span>
               </div>
             )}
             <div className="ligne-total grand">
