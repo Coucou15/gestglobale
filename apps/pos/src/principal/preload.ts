@@ -31,6 +31,9 @@ const api = {
       articleId, quantiteMilli, prixUnitaireCentimes,
     }),
   promotionsEnCours: () => ipcRenderer.invoke('caisse:promotions-en-cours'),
+  presenterBon: (code: string, montantCentimes: number) =>
+    ipcRenderer.invoke('caisse:presenter-bon', { code, montantCentimes }),
+  pointsClient: (clientId: string) => ipcRenderer.invoke('caisse:points-client', { clientId }),
   chercherTexte: (texte: string) => ipcRenderer.invoke('caisse:chercher-texte', { texte }),
   chercherClient: (texte: string) => ipcRenderer.invoke('caisse:chercher-client', { texte }),
   controlerCredit: (clientId: string, montantCentimes: number) =>

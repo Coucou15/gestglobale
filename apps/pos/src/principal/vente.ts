@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import { compteurSuivant } from './base';
 import { avantagesPour, type AvantageApplique } from './promotionsLocales';
+import { debiterLocalement } from './bons';
 import { articleParId, prixSelonCategorie, type ArticleLocal } from './catalogue';
 import {
   totauxDocument, calculerTimbre, numeroDocument, evaluerCredit,
@@ -423,6 +424,15 @@ export function encaisser(
       const cible = article.packDeId ?? article.id;
       const facteur = article.packDeId ? (article.packNbUnites ?? 1) : 1;
       decrementer.run(ligne.quantiteMilli * facteur, cible);
+    }
+
+    // Les bons presentes sont debites du solde local, pour qu'un meme
+    // bon ne soit pas represente avant la synchronisation suivante. Le
+    // solde qui fait foi reste celui du serveur.
+    for (const reglement of ticket.reglements) {
+      if (reglement.mode === 'BON_ACHAT' && reglement.reference) {
+        debiterLocalement(base, reglement.reference, reglement.montantCentimes);
+      }
     }
 
     // Mise en file d'envoi : dans la meme transaction que le ticket.

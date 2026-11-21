@@ -9,7 +9,7 @@ import {
   VERSION_PROTOCOLE_SYNC,
   type DemandeDescente, type ReponseDescente, type DemandeRemontee,
   type ReponseRemontee, type AccuseReception, type ArticleSync, type ClientSync,
-  type SessionSync,
+  type SessionSync, type BonSync,
   type PromotionSync, type UtilisateurSync,
 } from '@gestglobale/shared';
 import { permissionsEffectives } from '../auth/permissions.util';
@@ -42,6 +42,7 @@ interface Curseur {
   clients: Position;
   promotions: Position;
   utilisateurs: Position;
+  bons: Position;
   tombstones: number;
 }
 
@@ -54,6 +55,7 @@ function curseurVide(): Curseur {
     clients: { ...POSITION_INITIALE },
     promotions: { ...POSITION_INITIALE },
     utilisateurs: { ...POSITION_INITIALE },
+    bons: { ...POSITION_INITIALE },
     tombstones: 0,
   };
 }
@@ -77,6 +79,7 @@ function lireCurseur(valeur: string | null | undefined): Curseur {
       clients: lirePosition(decode.clients),
       promotions: lirePosition(decode.promotions),
       utilisateurs: lirePosition(decode.utilisateurs),
+      bons: lirePosition(decode.bons),
       tombstones: Number(decode.tombstones) || 0,
     };
   } catch {
@@ -153,7 +156,7 @@ export class SyncService {
     const curseur = lireCurseur(demande.curseur);
     const limite = Math.min(demande.limite ?? TAILLE_PAGE_DEFAUT, TAILLE_PAGE_MAX);
 
-    const [articles, clients, promotions, utilisateurs, tombstones] = await Promise.all([
+    const [articles, clients, promotions, utilisateurs, tombstones, bons] = await Promise.all([
       this.articlesModifies(curseur.articles, limite, caisse.magasinId),
       this.prisma.tiers.findMany({
         where: { ...apres(curseur.clients), actif: true },
@@ -178,6 +181,13 @@ export class SyncService {
         orderBy: { date: 'asc' },
         take: limite,
       }),
+      // Seuls les bons encore utilisables descendent : la caisse n'a pas
+      // besoin de connaitre l'historique des bons epuises.
+      this.prisma.bonAchat.findMany({
+        where: { ...apres(curseur.bons), actif: true, utilise: false },
+        orderBy: [{ modifieLe: 'asc' }, { id: 'asc' }],
+        take: limite,
+      }),
     ]);
 
     const suivant: Curseur = {
@@ -186,6 +196,7 @@ export class SyncService {
       clients: positionApres(clients, curseur.clients),
       promotions: positionApres(promotions, curseur.promotions),
       utilisateurs: positionApres(utilisateurs, curseur.utilisateurs),
+      bons: positionApres(bons, curseur.bons),
       tombstones:
         tombstones.length > 0
           ? tombstones[tombstones.length - 1].date.getTime()
@@ -199,6 +210,7 @@ export class SyncService {
       clients.length === limite ||
       promotions.length === limite ||
       utilisateurs.length === limite ||
+      bons.length === limite ||
       tombstones.length === limite;
 
     const parEntite = (entite: string) =>
@@ -239,6 +251,13 @@ export class SyncService {
         heureFin: p.heureFin,
         cumulable: p.cumulable,
       })),
+      bons: bons.map((bon): BonSync => ({
+        code: bon.code,
+        type: bon.type,
+        soldeCentimes: c(bon.soldeCentimes),
+        expireLe: bon.expireLe ? bon.expireLe.toISOString() : null,
+        actif: bon.actif,
+      })),
       utilisateurs: utilisateurs.map((u): UtilisateurSync => ({
         id: u.id,
         code: u.code,
@@ -255,6 +274,7 @@ export class SyncService {
         clients: parEntite('Tiers'),
         promotions: parEntite('Promotion'),
         utilisateurs: parEntite('Utilisateur'),
+        bons: parEntite('BonAchat'),
       },
       parametres: await this.parametresCaisse(caisse.magasinId),
     };

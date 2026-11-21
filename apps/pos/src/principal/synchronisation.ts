@@ -258,6 +258,21 @@ export class Synchronisation {
         );
       }
 
+      const majBon = this.base.prepare(
+        `INSERT INTO bon_achat (code, type, solde_centimes, expire_le, actif, descendu_le)
+         VALUES (?,?,?,?,?,?)
+         ON CONFLICT(code) DO UPDATE SET
+            type=excluded.type, solde_centimes=excluded.solde_centimes,
+            expire_le=excluded.expire_le, actif=excluded.actif,
+            descendu_le=excluded.descendu_le`,
+      );
+      for (const bon of reponse.bons ?? []) {
+        majBon.run(
+          bon.code, bon.type, bon.soldeCentimes, bon.expireLe,
+          bon.actif ? 1 : 0, maintenant,
+        );
+      }
+
       const majParametre = this.base.prepare(
         `INSERT INTO parametre (cle, valeur) VALUES (?, ?)
          ON CONFLICT(cle) DO UPDATE SET valeur = excluded.valeur`,
@@ -279,6 +294,9 @@ export class Synchronisation {
       }
       for (const id of reponse.supprimes.utilisateurs) {
         this.base.prepare('UPDATE utilisateur SET actif = 0 WHERE id = ?').run(id);
+      }
+      for (const code of reponse.supprimes.bons ?? []) {
+        this.base.prepare('UPDATE bon_achat SET actif = 0 WHERE code = ?').run(code);
       }
     });
 

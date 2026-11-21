@@ -165,6 +165,64 @@ async function principal() {
   etape('Trois laits en offrent un', offert?.unitesOffertesMilli === 1000,
     offert ? `${offert.unitesOffertesMilli / 1000} offert(s)` : 'aucune');
 
+  // --- Cartes cadeaux et bons d'achat (M10) ---------------------------
+  const annee = new Date().getFullYear();
+  const carte = `CAD-${annee}-000001`;
+
+  const bonsDescendus = await js(`window.caisse.presenterBon('${carte}', 10000)`);
+  etape('La carte cadeau du jeu d’essai est descendue en caisse',
+    bonsDescendus?.accepte === true, bonsDescendus?.message ?? '');
+  etape('Elle couvre la somme presentee',
+    bonsDescendus?.montantUtiliseCentimes === 10000
+      && bonsDescendus?.soldeApresCentimes === 90000,
+    `${(bonsDescendus?.soldeApresCentimes ?? 0) / 100} DA resteraient`);
+
+  const inconnu = await js(`window.caisse.presenterBon('CAD-1999-999999', 10000)`);
+  etape('Un code inconnu de la caisse est refuse, pas honore',
+    inconnu?.accepte === false && inconnu?.motif === 'INCONNU', inconnu?.message ?? '');
+
+  const tropGrand = await js(`window.caisse.presenterBon('${carte}', 500000)`);
+  etape('Une carte de 1 000 DA ne couvre pas 5 000 DA a elle seule',
+    tropGrand?.accepte === true
+      && tropGrand?.montantUtiliseCentimes === 100000
+      && tropGrand?.resteAPayerCentimes === 400000,
+    `reste ${(tropGrand?.resteAPayerCentimes ?? 0) / 100} DA a regler`);
+
+  // Vente payee moitie carte, moitie especes, puis verification que le
+  // solde local a bien baisse : une seconde presentation de la meme carte
+  // ne doit plus trouver 1 000 DA dessus.
+  const venteBon = await js(`(async () => {
+    const trouve = await window.caisse.chercherCode('6130000000017');
+    const panier = {
+      lignes: [{
+        numeroLigne: 1, article: trouve.article, codeScanne: trouve.codeScanne,
+        quantiteMilli: 2000, prixUnitaireCentimes: trouve.prixUnitaireCentimes,
+        remisePourcent: 0, remiseCentimes: 0, annulee: false,
+        autoriseeParId: null, promotionId: null,
+      }],
+      clientId: null, categoriePrix: 'DETAIL', remisePiedPourcent: 0,
+    };
+    return window.caisse.encaisser(panier, [
+      { mode: 'BON_ACHAT', montantCentimes: 100000, reference: '${carte}' },
+      { mode: 'ESPECES', montantCentimes: 50000 },
+    ]);
+  })()`);
+  etape('Une vente se regle moitie carte cadeau, moitie especes',
+    Boolean(venteBon?.ticket?.numero), venteBon?.ticket?.numero ?? '');
+
+  const apresUsage = await js(`window.caisse.presenterBon('${carte}', 10000)`);
+  etape('La carte est epuisee pour la caisse apres son usage',
+    apresUsage?.accepte === false && apresUsage?.motif === 'EPUISE',
+    apresUsage?.message ?? '');
+
+  const points = await js(`(async () => {
+    const trouves = await window.caisse.chercherClient('fidelite');
+    return trouves.length > 0 ? window.caisse.pointsClient(trouves[0].id) : null;
+  })()`);
+  etape('La caisse connait les points du client et leur valeur',
+    points?.points === 120 && points?.valeurCentimes === 12000,
+    `${points?.points ?? 0} points, ${(points?.valeurCentimes ?? 0) / 100} DA`);
+
   const impression = await js(`window.caisse.imprimer('${vente?.ticket?.numero}')`);
   etape('Le ticket se compose avec ses mentions legales',
     typeof impression?.texte === 'string' && impression.texte.includes('16/00-0000000 B 00'));
@@ -173,6 +231,35 @@ async function principal() {
   const cycle = await js(`window.caisse.synchroniser()`);
   etape('Le ticket remonte au serveur', cycle.remontee?.ok === true,
     `${cycle.remontee?.acceptes ?? 0} accuse(s)`);
+
+  // Le nombre d'accuses de ce cycle ne prouve rien : la caisse
+  // synchronise aussi d'elle-meme, et la file peut deja etre vide. On
+  // interroge donc le serveur sur l'etat de la carte.
+  const auServeur = await (async () => {
+    const connexion = await fetch('http://localhost:3000/api/v1/auth/connexion', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ login: 'gerant', motDePasse: 'GestGlobale2026!' }),
+    }).then((r) => r.json());
+    const bons = await fetch(
+      `http://localhost:3000/api/v1/fidelite/bons?code=${carte}`,
+      { headers: { Authorization: `Bearer ${connexion.jeton}` } },
+    ).then((r) => r.json());
+    return bons[0];
+  })();
+
+  etape('Le serveur a bien enregistre le reglement par carte cadeau',
+    (auServeur?.utilisations ?? []).length === 1,
+    `${(auServeur?.utilisations ?? []).length} utilisation(s)`);
+  etape('La carte est a zero au serveur comme en caisse',
+    Number(auServeur?.soldeCentimes) === 0, `solde ${auServeur?.soldeCentimes}`);
+  // Le montant inscrit au serveur doit etre au centime celui que la
+  // caisse a applique : c'est la que se verrait un arrondi silencieux.
+  etape('Le montant preleve au serveur est exactement celui de la caisse',
+    Number(auServeur?.utilisations?.[0]?.montantCentimes) === 100000,
+    `${Number(auServeur?.utilisations?.[0]?.montantCentimes) / 100} DA`);
+  etape('Aucun depassement n\u2019est signale sur cette vente',
+    Number(auServeur?.utilisations?.[0]?.decouvertCentimes) === 0);
 
   const etat = await js(`window.caisse.etatSync()`);
   etape('Le voyant repasse au vert', etat.couleur === 'vert',

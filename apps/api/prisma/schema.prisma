@@ -546,6 +546,8 @@ model Tiers {
 
   magasinInterne Magasin?              @relation(fields: [magasinInterneId], references: [id])
   mouvements     MouvementTiers[]
+  mouvementsFidelite MouvementFidelite[]
+  bonsAchat      BonAchat[]
   echeances      Echeance[]
   documentsVente DocumentVente[]
   commandes      CommandeFournisseur[]
@@ -1324,6 +1326,7 @@ enum TypeBon {
   BON_ACHAT
 }
 
+/// Carte cadeau ou bon d'achat : de l'argent au porteur.
 model BonAchat {
   id               String   @id @default(uuid())
   code             String   @unique
@@ -1333,10 +1336,68 @@ model BonAchat {
   emisLe           DateTime @default(now())
   expireLe         DateTime?
   clientId         String?
+  /// Vrai quand le solde est epuise ; un bon annule est `actif = false`.
   utilise          Boolean  @default(false)
+  actif            Boolean  @default(true)
+  motifAnnulation  String?
+  /// Instant de l'annulation. Un ticket d'avant cette date reste
+  /// legitime : la caisse ne pouvait pas deviner l'annulation a venir.
+  annuleLe         DateTime?
   documentEmissionNumero String?
+  emisParId        String?
   creeLe           DateTime @default(now())
   modifieLe        DateTime @updatedAt
+
+  client       Tiers?           @relation(fields: [clientId], references: [id])
+  utilisations UtilisationBon[]
+
+  @@index([actif, utilise])
+  @@index([clientId])
+}
+
+/// Chaque usage d'un bon, pour que le solde se lise sans recalcul et
+/// qu'un meme ticket ne le debite jamais deux fois.
+model UtilisationBon {
+  id              String   @id @default(uuid())
+  bonId           String
+  /// Numero du ticket ou du document ayant consomme le bon. Unique par
+  /// bon : un ticket renvoye apres un accuse perdu ne redebite pas.
+  documentNumero  String
+  montantCentimes BigInt
+  soldeApresCentimes BigInt
+  /// Vrai si l'usage a eu lieu pendant une coupure reseau.
+  horsLigne       Boolean  @default(false)
+  /// Renseigne quand le bon ne couvrait plus la somme presentee : la
+  /// vente a eu lieu, l'ecart est a arbitrer par le gerant.
+  decouvertCentimes BigInt @default(0)
+  date            DateTime @default(now())
+  utilisateurId   String?
+  creeLe          DateTime @default(now())
+
+  bon BonAchat @relation(fields: [bonId], references: [id], onDelete: Cascade)
+
+  @@unique([bonId, documentNumero])
+  @@index([date])
+  @@index([decouvertCentimes])
+}
+
+/// Mouvement de points de fidelite, pour que le solde d'un client se
+/// justifie ligne par ligne.
+model MouvementFidelite {
+  id             String   @id @default(uuid())
+  clientId       String
+  /// Positif a l'acquisition, negatif a l'utilisation.
+  points         Int
+  soldeApres     Int
+  motif          String
+  documentNumero String?
+  date           DateTime @default(now())
+  creeLe         DateTime @default(now())
+
+  client Tiers @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, documentNumero, motif])
+  @@index([clientId, date])
 }
 
 // ---------------------------------------------------------------------

@@ -120,6 +120,20 @@ export interface PromotionSync {
   cumulable: boolean;
 }
 
+/**
+ * Bon d'achat descendu vers la caisse.
+ *
+ * Seuls les bons encore utilisables descendent : la caisse n'a pas a
+ * connaitre l'historique des bons epuises.
+ */
+export interface BonSync {
+  code: string;
+  type: 'CARTE_CADEAU' | 'BON_ACHAT';
+  soldeCentimes: Centimes;
+  expireLe: string | null;
+  actif: boolean;
+}
+
 export interface UtilisateurSync {
   id: string;
   code: string;
@@ -140,9 +154,13 @@ export interface ReponseDescente {
   articles: ArticleSync[];
   clients: ClientSync[];
   promotions: PromotionSync[];
+  bons: BonSync[];
   utilisateurs: UtilisateurSync[];
   /** Identifiants d'entites supprimees ou devenues invisibles. */
-  supprimes: { articles: string[]; clients: string[]; promotions: string[]; utilisateurs: string[] };
+  supprimes: {
+    articles: string[]; clients: string[]; promotions: string[];
+    utilisateurs: string[]; bons: string[];
+  };
   parametres: Record<string, unknown>;
 }
 

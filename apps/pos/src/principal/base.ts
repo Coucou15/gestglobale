@@ -116,6 +116,18 @@ export function creerSchema(base: Database.Database): void {
       actif          INTEGER NOT NULL DEFAULT 1
     );
 
+    -- Bons d'achat et cartes cadeaux connus de la caisse.
+    -- Le solde est celui de la derniere synchronisation : hors ligne, la
+    -- caisse ne peut pas savoir qu'une autre vient de debiter le meme bon.
+    CREATE TABLE IF NOT EXISTS bon_achat (
+      code           TEXT PRIMARY KEY,
+      type           TEXT NOT NULL,
+      solde_centimes INTEGER NOT NULL DEFAULT 0,
+      expire_le      TEXT,
+      actif          INTEGER NOT NULL DEFAULT 1,
+      descendu_le    TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS parametre (
       cle    TEXT PRIMARY KEY,
       valeur TEXT NOT NULL

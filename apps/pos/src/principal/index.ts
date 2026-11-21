@@ -13,7 +13,9 @@ import {
 } from './session';
 import { Synchronisation, clientHttpParDefaut, CLE_JETON } from './synchronisation';
 import { composerTicket, versEscPos, type EnteteTicket } from './impression';
+import { BAREME_FIDELITE_DEFAUT, valeurDesPoints } from '@gestglobale/shared';
 import type { ParametrageTimbre, TicketSync } from '@gestglobale/shared';
+import { presenterBon } from './bons';
 
 interface ConfigurationFichier {
   urlServeur: string;
@@ -309,6 +311,26 @@ function enregistrerCanaux(fenetre: BrowserWindow): void {
   );
 
   ipcMain.handle('caisse:promotions-en-cours', () => promotionsEnCours(base));
+
+  /** Presente un bon d'achat pour un montant : la caisse dit s'il couvre. */
+  ipcMain.handle('caisse:presenter-bon', (_e, { code, montantCentimes }) =>
+    presenterBon(base, code, montantCentimes),
+  );
+
+  /** Points de fidelite connus d'un client, et leur valeur en dinars. */
+  ipcMain.handle('caisse:points-client', (_e, { clientId }) => {
+    const client = base
+      .prepare('SELECT points_fidelite AS points FROM client WHERE id = ?')
+      .get(clientId) as { points: number } | undefined;
+    const brut = base
+      .prepare(`SELECT valeur FROM parametre WHERE cle = 'caisse.fidelite'`)
+      .get() as { valeur: string } | undefined;
+    const bareme = brut
+      ? { ...BAREME_FIDELITE_DEFAUT, ...JSON.parse(brut.valeur) }
+      : BAREME_FIDELITE_DEFAUT;
+    const points = client?.points ?? 0;
+    return { points, valeurCentimes: valeurDesPoints(points, bareme), bareme };
+  });
   ipcMain.handle('caisse:chercher-texte', (_e, { texte }) => chercherParTexte(base, texte));
 
   ipcMain.handle('caisse:chercher-client', (_e, { texte }) => {

@@ -47,6 +47,17 @@ export interface ClientCaisse {
   pointsFidelite: number;
 }
 
+export interface DecisionBonCaisse {
+  code: string;
+  accepte: boolean;
+  motif: 'INCONNU' | 'ANNULE' | 'EXPIRE' | 'EPUISE' | null;
+  message: string | null;
+  montantUtiliseCentimes: number;
+  resteAPayerCentimes: number;
+  soldeApresCentimes: number;
+  decouvertCentimes: number;
+}
+
 export interface EtatSync {
   etat: string;
   couleur: 'vert' | 'orange' | 'rouge';
@@ -81,6 +92,11 @@ interface ApiCaisse {
     articleId: string, quantiteMilli: number, prixUnitaireCentimes: number,
   ): Promise<AvantagePromotion[]>;
   promotionsEnCours(): Promise<unknown[]>;
+  presenterBon(code: string, montantCentimes: number): Promise<DecisionBonCaisse>;
+  pointsClient(clientId: string): Promise<{
+    points: number; valeurCentimes: number;
+    bareme: { minimumUtilisation: number; valeurPointCentimes: number };
+  }>;
   chercherTexte(texte: string): Promise<ArticleCaisse[]>;
   chercherClient(texte: string): Promise<ClientCaisse[]>;
   controlerCredit(clientId: string, montantCentimes: number): Promise<{

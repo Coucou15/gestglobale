@@ -8,7 +8,7 @@
  * Il ne remplace pas l'import de l'ancien logiciel (section 7) : c'est un
  * socle pour les essais, la formation et la recette.
  */
-import { PrismaClient, TypeEmplacement, TypeCompte, CodeRole, TypeTiers, TypeClient, CategoriePrix, UniteMesure } from '@prisma/client';
+import { PrismaClient, TypeEmplacement, TypeCompte, CodeRole, TypeTiers, TypeClient, CategoriePrix, UniteMesure, TypeBon } from '@prisma/client';
 import * as argon2 from 'argon2';
 
 const prisma = new PrismaClient();
@@ -356,6 +356,41 @@ async function main(): Promise<void> {
     },
   });
 
+  // --- Cartes cadeaux et bons d'achat (M10) ------------------------------
+  // Trois cartes de 1 000 DA et deux bons de 500 DA, de quoi essayer un
+  // reglement par bon en caisse, hors ligne comme en ligne.
+  const dansUnAn = new Date(Date.now() + 365 * 86400000);
+  const annee = new Date().getFullYear();
+  const codeBon = (prefixe: string, n: number) =>
+    `${prefixe}-${annee}-${String(n).padStart(6, '0')}`;
+  await prisma.bonAchat.createMany({
+    data: [
+      ...[1, 2, 3].map((n) => ({
+        code: codeBon('CAD', n),
+        type: TypeBon.CARTE_CADEAU,
+        montantCentimes: BigInt(100000),
+        soldeCentimes: BigInt(100000),
+        expireLe: dansUnAn,
+      })),
+      ...[1, 2].map((n) => ({
+        code: codeBon('BON', n),
+        type: TypeBon.BON_ACHAT,
+        montantCentimes: BigInt(50000),
+        soldeCentimes: BigInt(50000),
+        expireLe: dansUnAn,
+      })),
+    ],
+  });
+  // Les compteurs repartent apres les codes du jeu d'essai : sans cela, la
+  // premiere emission reelle tomberait sur un code deja pris.
+  await prisma.compteur.createMany({
+    data: [
+      { cle: `CAD.${annee}`, valeur: 3 },
+      { cle: `BON.${annee}`, valeur: 2 },
+    ],
+    skipDuplicates: true,
+  });
+
   // --- Tiers -------------------------------------------------------------
   await prisma.tiers.createMany({
     data: [
@@ -394,6 +429,8 @@ Jeu de donnees cree.
   Utilisateurs   : ${comptes.length} (codes 1 a 11)
   Articles       : ${articles.length} + 1 pack
   Promotions     : 4 (prix barre, X pour Y, remise famille, happy hour)
+  Bons d'achat   : ${codeBon('CAD', 1)} a ${codeBon('CAD', 3)} (1 000 DA),
+                   ${codeBon('BON', 1)} et ${codeBon('BON', 2)} (500 DA)
   Gerant         : login "gerant", mot de passe "${MOT_DE_PASSE_DEMO}"
   Caisse         : code "3", PIN "${PIN_DEMO}"
 

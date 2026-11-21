@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
   promotionEnVigueur, avantagesDeLaLigne, pointsGagnes, valeurDesPoints,
   BAREME_FIDELITE_DEFAUT, versMilli,
-  type Promotion, type LignePromotionnable,
+  evaluerBon, appliquerUsageBon,
+  type Promotion, type LignePromotionnable, type BonConnu,
 } from '../index';
 
 const promotion = (surcharge: Partial<Promotion>): Promotion => ({
@@ -214,5 +215,83 @@ describe('Fidelite', () => {
   it('refuse d utiliser des points sous le minimum', () => {
     expect(valeurDesPoints(49, bareme)).toBe(0);
     expect(valeurDesPoints(50, bareme)).toBe(5000);
+  });
+});
+
+describe('Cartes cadeaux et bons d achat', () => {
+  const bon = (surcharge: Partial<BonConnu> = {}): BonConnu => ({
+    code: 'CAD-0001', soldeCentimes: 500000, expireLe: null, actif: true, ...surcharge,
+  });
+  const maintenant = new Date('2026-11-21T12:00:00.000Z');
+
+  it('refuse un bon inconnu de la caisse', () => {
+    const d = evaluerBon(null, 10000, maintenant);
+    expect(d.accepte).toBe(false);
+    expect(d.motif).toBe('INCONNU');
+  });
+
+  it('refuse un bon annule', () => {
+    expect(evaluerBon(bon({ actif: false }), 10000, maintenant).motif).toBe('ANNULE');
+  });
+
+  it('refuse un bon expire', () => {
+    const d = evaluerBon(bon({ expireLe: '2026-01-01T00:00:00.000Z' }), 10000, maintenant);
+    expect(d.motif).toBe('EXPIRE');
+    expect(d.message).toContain('expire');
+  });
+
+  it('refuse un bon epuise', () => {
+    expect(evaluerBon(bon({ soldeCentimes: 0 }), 10000, maintenant).motif).toBe('EPUISE');
+  });
+
+  it('couvre entierement un montant inferieur au solde', () => {
+    const d = evaluerBon(bon(), 200000, maintenant);
+    expect(d.accepte).toBe(true);
+    expect(d.montantUtiliseCentimes).toBe(200000);
+    expect(d.resteAPayerCentimes).toBe(0);
+    expect(d.soldeApresCentimes).toBe(300000);
+  });
+
+  it('ne couvre qu une partie d un montant superieur, le reste se paie autrement', () => {
+    const d = evaluerBon(bon({ soldeCentimes: 150000 }), 200000, maintenant);
+    expect(d.montantUtiliseCentimes).toBe(150000);
+    expect(d.resteAPayerCentimes).toBe(50000);
+    expect(d.soldeApresCentimes).toBe(0);
+  });
+
+  it('accepte un bon qui expire aujourd hui', () => {
+    const d = evaluerBon(bon({ expireLe: '2026-11-21T23:59:59.000Z' }), 10000, maintenant);
+    expect(d.accepte).toBe(true);
+  });
+
+  it('revele au serveur un bon depense deux fois hors ligne', () => {
+    // La caisse a accepte 2 000 DA sur un solde qu'elle croyait entier ;
+    // une autre caisse l'avait deja vide a 500 DA.
+    const r = appliquerUsageBon(50000, 200000);
+    expect(r.debiteCentimes).toBe(50000);
+    expect(r.soldeApresCentimes).toBe(0);
+    expect(r.decouvertCentimes).toBe(150000);
+  });
+
+  it('ne signale aucun decouvert quand le solde suffit', () => {
+    const r = appliquerUsageBon(300000, 200000);
+    expect(r.decouvertCentimes).toBe(0);
+    expect(r.soldeApresCentimes).toBe(100000);
+  });
+
+  it('laisse intact le solde d\'un bon annule accepte hors ligne', () => {
+    // Une carte declaree perdue a ete annulee au siege, mais une caisse
+    // en coupure ne pouvait pas le savoir. La vente tient ; en revanche
+    // le solde ne part pas, car le client honnete recevra une carte de
+    // remplacement du meme montant. Tout est porte au rapport.
+    const r = appliquerUsageBon(200000, 75000, { valable: false });
+    expect(r.debiteCentimes).toBe(0);
+    expect(r.soldeApresCentimes).toBe(200000);
+    expect(r.decouvertCentimes).toBe(75000);
+  });
+
+  it('traite « valable » explicite comme le cas normal', () => {
+    expect(appliquerUsageBon(200000, 75000, { valable: true }))
+      .toEqual(appliquerUsageBon(200000, 75000));
   });
 });

@@ -262,7 +262,209 @@ async function main() {
   verifier('Le depassement reste forcable par un superviseur',
     creditExcessif.donnees?.forcagePossible === true);
 
-  titre('9. Cloture Z avec ecart');
+  titre('9. Fidelite, cartes cadeaux et bons d\'achat (M10)');
+
+  // Le bareme du jeu d'essai : 1 point par 100 DA, un point vaut 1 DA.
+  const bareme = await appel('/fidelite/bareme', { jeton: jetonGerant });
+  verifier('Le bareme de fidelite est lisible',
+    bareme.donnees?.actif === true && bareme.donnees?.centimesParPoint === 10000,
+    JSON.stringify(bareme.donnees));
+
+  const clientFidele = clients.donnees?.tiers?.find((t) => t.code === 'C0002');
+  const pointsAvant = await appel(`/fidelite/points/${clientFidele.id}`, { jeton: jetonGerant });
+
+  // Un ticket de 2 000 DA au client fidele : 20 points.
+  const tFid = ticket('SV-03-000004',
+    [ligne(1, huile, 2000, huile.prixDetailCentimes)],
+    [{ mode: 'CARTE', montantCentimes: 0, reference: 'TPE-0002' }],
+    { clientId: clientFidele.id },
+  );
+  tFid.reglements[0].montantCentimes = tFid.totalTtcCentimes;
+  await appel('/sync/remontee', {
+    methode: 'POST', jeton: jetonCaissier,
+    corps: {
+      versionProtocole: 1, codeMagasin: 'SV', numeroCaisse: 3,
+      sessions: [], tickets: [tFid], clotures: [], mouvements: [],
+    },
+  });
+
+  const pointsApres = await appel(`/fidelite/points/${clientFidele.id}`, { jeton: jetonGerant });
+  const gagnes = Math.floor(tFid.totalTtcCentimes / 10000);
+  verifier('Le ticket credite les points du client',
+    pointsApres.donnees?.points === (pointsAvant.donnees?.points ?? 0) + gagnes,
+    `${pointsAvant.donnees?.points} -> ${pointsApres.donnees?.points}, attendu +${gagnes}`);
+
+  // Rejouer le meme ticket ne doit pas crediter une seconde fois.
+  await appel('/sync/remontee', {
+    methode: 'POST', jeton: jetonCaissier,
+    corps: {
+      versionProtocole: 1, codeMagasin: 'SV', numeroCaisse: 3,
+      sessions: [], tickets: [tFid], clotures: [], mouvements: [],
+    },
+  });
+  const pointsRejeu = await appel(`/fidelite/points/${clientFidele.id}`, { jeton: jetonGerant });
+  verifier('Un ticket renvoye ne credite pas les points deux fois',
+    pointsRejeu.donnees?.points === pointsApres.donnees?.points,
+    `${pointsApres.donnees?.points} -> ${pointsRejeu.donnees?.points}`);
+
+  // Conversion des points en bon : c'est ainsi qu'ils se depensent.
+  const conversion = await appel(`/fidelite/points/${clientFidele.id}/conversion`, {
+    methode: 'POST', jeton: jetonGerant, corps: { points: 100 },
+  });
+  verifier('Les points se convertissent en bon d\'achat',
+    conversion.donnees?.bon?.code !== undefined
+      && Number(conversion.donnees?.montantCentimes) === 100 * bareme.donnees.valeurPointCentimes,
+    JSON.stringify({ code: conversion.donnees?.bon?.code, montant: conversion.donnees?.montantCentimes }));
+
+  const pointsConvertis = await appel(`/fidelite/points/${clientFidele.id}`, { jeton: jetonGerant });
+  verifier('Les points convertis sont retires du solde',
+    pointsConvertis.donnees?.points === pointsRejeu.donnees.points - 100,
+    `${pointsRejeu.donnees?.points} -> ${pointsConvertis.donnees?.points}`);
+
+  const tropDePoints = await appel(`/fidelite/points/${clientFidele.id}/conversion`, {
+    methode: 'POST', jeton: jetonGerant, corps: { points: 100000 },
+  });
+  verifier('On ne convertit pas plus de points que le client n\'en a',
+    tropDePoints.statut === 400, `statut ${tropDePoints.statut}`);
+
+  // Emission d'une carte cadeau, puis vente payee avec.
+  const emission = await appel('/fidelite/bons', {
+    methode: 'POST', jeton: jetonGerant,
+    corps: { type: 'CARTE_CADEAU', montantCentimes: 200000, nombre: 2 },
+  });
+  verifier('Le gerant emet deux cartes cadeaux de 2 000 DA',
+    Array.isArray(emission.donnees) && emission.donnees.length === 2,
+    JSON.stringify(emission.donnees?.map?.((b) => b.code)));
+  const carte = emission.donnees?.[0];
+
+  const refusCaissier = await appel('/fidelite/bons', {
+    methode: 'POST', jeton: jetonCaissier,
+    corps: { type: 'CARTE_CADEAU', montantCentimes: 100000 },
+  });
+  verifier('Un caissier ne peut pas emettre de carte cadeau',
+    refusCaissier.statut === 403, `statut ${refusCaissier.statut}`);
+
+  // La carte descend vers les caisses avec son solde.
+  const descenteBons = await appel('/sync/descente', {
+    methode: 'POST', jeton: jetonCaissier,
+    corps: { versionProtocole: 1, codeMagasin: 'SV', numeroCaisse: 3, curseur: null },
+  });
+  const carteDescendue = (descenteBons.donnees?.bons ?? []).find((b) => b.code === carte.code);
+  verifier('La carte cadeau descend vers la caisse avec son solde',
+    carteDescendue !== undefined && carteDescendue.soldeCentimes === 200000,
+    JSON.stringify(carteDescendue));
+
+  // Vente de 1 000 DA payee par la carte : il doit rester 1 000 DA dessus.
+  const tBon = ticket('SV-03-000005',
+    [ligne(1, huile, 1000, huile.prixDetailCentimes)],
+    [{ mode: 'BON_ACHAT', montantCentimes: 0, reference: carte.code }],
+  );
+  tBon.reglements[0].montantCentimes = tBon.totalTtcCentimes;
+  const envoiBon = await appel('/sync/remontee', {
+    methode: 'POST', jeton: jetonCaissier,
+    corps: {
+      versionProtocole: 1, codeMagasin: 'SV', numeroCaisse: 3,
+      sessions: [], tickets: [tBon], clotures: [], mouvements: [],
+    },
+  });
+  verifier('Une vente payee par carte cadeau est acceptee',
+    (envoiBon.donnees?.tickets ?? [])[0]?.statut === 'ACCEPTE',
+    JSON.stringify(envoiBon.donnees?.tickets));
+
+  const apresUsage = await appel(`/fidelite/bons?code=${carte.code}`, { jeton: jetonGerant });
+  const bonApres = apresUsage.donnees?.[0];
+  verifier('Le solde de la carte est diminue du montant paye',
+    Number(bonApres?.soldeCentimes) === 200000 - tBon.totalTtcCentimes,
+    `solde ${bonApres?.soldeCentimes}, attendu ${200000 - tBon.totalTtcCentimes}`);
+
+  // Scenario redoute : deux caisses hors ligne acceptent la meme carte.
+  // Le solde restant ne couvre qu'une partie ; la vente tient quand meme
+  // et l'ecart doit etre signale, jamais efface.
+  const resteSurLaCarte = Number(bonApres.soldeCentimes);
+  const tDouble = ticket('SV-03-000006',
+    [ligne(1, huile, 3000, huile.prixDetailCentimes)],
+    [{ mode: 'BON_ACHAT', montantCentimes: 0, reference: carte.code }],
+    { horsLigne: true },
+  );
+  tDouble.reglements[0].montantCentimes = tDouble.totalTtcCentimes;
+  const envoiDouble = await appel('/sync/remontee', {
+    methode: 'POST', jeton: jetonCaissier,
+    corps: {
+      versionProtocole: 1, codeMagasin: 'SV', numeroCaisse: 3,
+      sessions: [], tickets: [tDouble], clotures: [], mouvements: [],
+    },
+  });
+  verifier('Une vente hors ligne payee au-dela du solde n\'est pas refusee',
+    (envoiDouble.donnees?.tickets ?? [])[0]?.statut === 'ACCEPTE',
+    JSON.stringify(envoiDouble.donnees?.tickets));
+
+  const decouverts = await appel('/fidelite/bons/decouverts', { jeton: jetonGerant });
+  const decouvert = (decouverts.donnees ?? []).find((d) => d.documentNumero === tDouble.numero);
+  const manquant = tDouble.totalTtcCentimes - resteSurLaCarte;
+  verifier('Le depassement est signale au gerant, au centime',
+    decouvert !== undefined && Number(decouvert.decouvertCentimes) === manquant,
+    `signale ${decouvert?.decouvertCentimes}, attendu ${manquant}`);
+
+  const videe = await appel(`/fidelite/bons?code=${carte.code}`, { jeton: jetonGerant });
+  verifier('La carte est a zero, jamais en negatif',
+    Number(videe.donnees?.[0]?.soldeCentimes) === 0,
+    `solde ${videe.donnees?.[0]?.soldeCentimes}`);
+
+  // Idempotence : le meme ticket renvoye ne redebite pas le bon.
+  await appel('/sync/remontee', {
+    methode: 'POST', jeton: jetonCaissier,
+    corps: {
+      versionProtocole: 1, codeMagasin: 'SV', numeroCaisse: 3,
+      sessions: [], tickets: [tBon], clotures: [], mouvements: [],
+    },
+  });
+  const apresRejeu = await appel(`/fidelite/bons?code=${carte.code}`, { jeton: jetonGerant });
+  verifier('Un ticket renvoye ne debite pas le bon une seconde fois',
+    (apresRejeu.donnees?.[0]?.utilisations ?? []).length === 2,
+    `${(apresRejeu.donnees?.[0]?.utilisations ?? []).length} utilisation(s)`);
+  verifier('L\'ecran du gerant recoit le detail de chaque passage du bon',
+    (apresRejeu.donnees?.[0]?.utilisations ?? [])
+      .every((u) => u.documentNumero !== undefined && u.decouvertCentimes !== undefined));
+
+  // Annulation d'une carte perdue.
+  const carte2 = emission.donnees?.[1];
+  const annulation = await appel(`/fidelite/bons/${carte2.id}/annulation`, {
+    methode: 'POST', jeton: jetonGerant, corps: { motif: 'Carte perdue par le client' },
+  });
+  verifier('Une carte perdue peut etre annulee',
+    annulation.statut === 200 || annulation.statut === 201, `statut ${annulation.statut}`);
+
+  const tAnnule = ticket('SV-03-000007',
+    [ligne(1, huile, 1000, huile.prixDetailCentimes)],
+    [{ mode: 'BON_ACHAT', montantCentimes: 0, reference: carte2.code }],
+  );
+  tAnnule.reglements[0].montantCentimes = tAnnule.totalTtcCentimes;
+  const envoiAnnule = await appel('/sync/remontee', {
+    methode: 'POST', jeton: jetonCaissier,
+    corps: {
+      versionProtocole: 1, codeMagasin: 'SV', numeroCaisse: 3,
+      sessions: [], tickets: [tAnnule], clotures: [], mouvements: [],
+    },
+  });
+  // La vente a eu lieu : elle tient. Mais la carte annulee ne couvre rien,
+  // donc la totalite doit apparaitre en depassement.
+  verifier('Une vente payee avec une carte annulee tient, et le manque est signale',
+    (envoiAnnule.donnees?.tickets ?? [])[0]?.statut === 'ACCEPTE',
+    JSON.stringify(envoiAnnule.donnees?.tickets));
+  const decouverts2 = await appel('/fidelite/bons/decouverts', { jeton: jetonGerant });
+  const dAnnule = (decouverts2.donnees ?? []).find((d) => d.documentNumero === tAnnule.numero);
+  verifier('Le montant paye avec une carte annulee est integralement signale',
+    dAnnule !== undefined && Number(dAnnule.decouvertCentimes) === tAnnule.totalTtcCentimes,
+    `signale ${dAnnule?.decouvertCentimes}, attendu ${tAnnule.totalTtcCentimes}`);
+
+  // Le solde d'une carte annulee ne doit pas partir : si elle a ete
+  // declaree perdue, le client en recevra une autre pour le meme montant.
+  const carte2Apres = await appel(`/fidelite/bons?code=${carte2.code}`, { jeton: jetonGerant });
+  verifier('Le solde d\'une carte annulee reste intact malgre la vente',
+    Number(carte2Apres.donnees?.[0]?.soldeCentimes) === 200000,
+    `solde ${carte2Apres.donnees?.[0]?.soldeCentimes}, attendu 200000`);
+
+  titre('10. Cloture Z avec ecart');
 
   const totaux = await appel(`/caisse/sessions/${idSession}/totaux`, { jeton: jetonGerant });
   const especesTheoriques = (totaux.donnees?.theoriques ?? [])
@@ -326,7 +528,7 @@ async function main() {
   verifier('Une nouvelle session peut s\'ouvrir apres la cloture',
     reouverture.statut === 201 || reouverture.statut === 200);
 
-  titre('10. Journal d\'audit');
+  titre('11. Journal d\'audit');
 
   const audit = await appel('/audit?taille=5', { jeton: jetonGerant });
   verifier('Le journal d\'audit enregistre les actions', (audit.donnees?.total ?? 0) > 0,

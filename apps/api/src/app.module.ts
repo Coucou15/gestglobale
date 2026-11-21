@@ -18,6 +18,7 @@ import { ImportModule } from './import/import.module';
 import { RapportsModule } from './rapports/rapports.module';
 import { ReferentielModule } from './referentiel/referentiel.module';
 import { PromotionsModule } from './promotions/promotions.module';
+import { FideliteModule } from './fidelite/fidelite.module';
 import { DroitsGuard } from './auth/droits.guard';
 
 @Module({
@@ -39,6 +40,7 @@ import { DroitsGuard } from './auth/droits.guard';
     RapportsModule,
     ReferentielModule,
     PromotionsModule,
+    FideliteModule,
   ],
   providers: [
     // Toute route est protegee par defaut ; @Public() ouvre explicitement.

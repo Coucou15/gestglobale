@@ -17,12 +17,15 @@ a M8, l'assistant de migration et la caisse hors ligne.
 | Back-office web (React) | tableau de bord, articles, promotions, stocks, factures et bons de livraison, receptions, inventaires, caisses, tiers, tresorerie, historique repris, audit |
 | Assistant d'import | lit l'export Excel de l'ancien logiciel, le controle et le charge |
 
-**114 verifications automatisees** passent contre une vraie base et une
-API reellement demarree : `pnpm recette`.
+**247 verifications automatisees** passent contre une vraie base, une API
+reellement demarree et, pour la caisse, un vrai Electron : `pnpm recette`.
 
 Le parcours de saisie est verifie dans un vrai navigateur, de la
 reception a l'inventaire jusqu'au cloisonnement des droits :
 `node apps/backoffice/test-navigateur.mjs`, API et back-office demarres.
+Les ecrans de documents, d'historique, de promotions et de fidelite ont
+chacun leur verification : `test-documents.mjs`, `test-historique.mjs`,
+`test-promotions.mjs`, `test-fidelite.mjs`.
 
 Un **test de charge au volume reel** (30 015 articles, 430 tickets sur
 2 caisses) tient les quatre exigences chiffrees de la section 8 avec un a
@@ -272,10 +275,12 @@ le serveur et enchaine :
 
 | Suite | Verifications |
 |---|---|
-| Noyau metier (hors base, hors reseau) | 56 |
-| Nettoyage a l'import | 23 |
-| Recette fonctionnelle du lot 1 | 38 |
+| Noyau metier (hors base, hors reseau) | 67 |
+| Nettoyage a l'import et documents de vente | 61 |
+| Recette fonctionnelle du lot 1 et M10 | 58 |
 | Coupure reseau de la caisse | 20 |
+| Cartes cadeaux pendant une coupure | 8 |
+| La caisse de bout en bout sous Electron | 33 |
 
 ```bash
 pnpm charge
@@ -317,10 +322,13 @@ ligne produisent exactement les memes ecritures.
 L'etat detaille, module par module, est dans
 [`docs/etat-du-projet.md`](docs/etat-du-projet.md).
 
-En resume : le lot 1 est complet et verifie, caisse empaquetee comprise.
-Restent l'execution de l'installateur sur une vraie machine Windows, sa
-signature, la generation PDF cote serveur pour l'envoi par courriel, puis
-les lots 2 et 3 (fidelite, multi-magasins, comptabilite, personnel).
+En resume : le lot 1 est complet et verifie, caisse empaquetee comprise,
+et le module M10 du lot 2 est livre — promotions, points de fidelite,
+cartes cadeaux et bons d'achat, tous appliques en caisse hors ligne
+comprise. Restent l'execution de l'installateur sur une vraie machine
+Windows, sa signature, la generation PDF cote serveur pour l'envoi par
+courriel, puis le reste des lots 2 et 3 (exports et etats M9,
+consolidation multi-magasins M11, comptabilite M12, personnel M13).
 
 Plusieurs points demandent une decision de votre part avant d'aller plus
 loin ; ils sont listes a la fin du meme document.

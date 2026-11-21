@@ -52,7 +52,15 @@ export function Paiement({
   surAnnuler: () => void;
   surEncaisse: (numero: string) => void;
 }) {
-  const [reglements, setReglements] = useState<Array<{ mode: Mode; montantCentimes: number }>>([]);
+  const [reglements, setReglements] = useState<
+    Array<{ mode: Mode; montantCentimes: number; reference?: string }>
+  >([]);
+  // Saisie du code quand le client presente un bon ou une carte cadeau.
+  const [codeBon, setCodeBon] = useState<string | null>(null);
+  const [points, setPoints] = useState<{
+    points: number; valeurCentimes: number;
+    bareme: { minimumUtilisation: number; valeurPointCentimes: number };
+  } | null>(null);
   const [saisie, setSaisie] = useState('');
   const [erreur, setErreur] = useState<string | null>(null);
   const [rechercheClient, setRechercheClient] = useState('');
@@ -62,6 +70,13 @@ export function Paiement({
   const encaisse = reglements.reduce((t, r) => t + r.montantCentimes, 0);
   const reste = Math.max(0, totalCentimes - encaisse);
   const rendu = Math.max(0, encaisse - totalCentimes);
+
+  useEffect(() => {
+    if (!client) { setPoints(null); return; }
+    let vivant = true;
+    void caisse().pointsClient(client.id).then((p) => { if (vivant) setPoints(p); });
+    return () => { vivant = false; };
+  }, [client]);
 
   useEffect(() => {
     if (rechercheClient.length < 2) { setClients([]); return; }
@@ -91,6 +106,45 @@ export function Paiement({
     }
     setReglements((r) => [...r, { mode, montantCentimes: montant }]);
     setSaisie('');
+  };
+
+  /**
+   * Le client presente un bon : la caisse l'evalue sur le solde qu'elle
+   * connait. Hors ligne ce solde peut etre perime ; le serveur signalera
+   * tout depassement a la remontee plutot que de refuser la vente.
+   */
+  const accepterBon = async (code: string) => {
+    setErreur(null);
+    const demande = Math.min(montantSaisi(), reste);
+    if (demande <= 0) { setCodeBon(null); return; }
+
+    const decision = await caisse().presenterBon(code, demande);
+    if (!decision.accepte) {
+      setErreur(
+        (decision.message ?? 'Bon refuse')
+          + (decision.motif === 'INCONNU'
+            ? ' — s’il vient d’etre emis, synchronisez la caisse'
+            : ''),
+      );
+      return;
+    }
+
+    setReglements((r) => [
+      ...r,
+      {
+        mode: 'BON_ACHAT',
+        montantCentimes: decision.montantUtiliseCentimes,
+        reference: decision.code,
+      },
+    ]);
+    setCodeBon(null);
+    setSaisie('');
+    if (decision.resteAPayerCentimes > 0) {
+      setErreur(
+        `Le bon couvre ${formater(decision.montantUtiliseCentimes)} DA — `
+          + `reste ${formater(decision.resteAPayerCentimes)} DA a regler`,
+      );
+    }
   };
 
   const montantSaisi = (): number => {
@@ -177,19 +231,53 @@ export function Paiement({
             <button
               key={mode}
               className={mode === 'ESPECES' ? 'principal' : ''}
-              onClick={() => void ajouterReglement(mode, montantSaisi())}
+              onClick={() => {
+                if (mode === 'BON_ACHAT') { setErreur(null); setCodeBon(''); return; }
+                void ajouterReglement(mode, montantSaisi());
+              }}
             >
               {LIBELLES[mode]}
             </button>
           ))}
         </div>
 
+        {codeBon !== null && (
+          <div className="champ" style={{ marginTop: 16 }}>
+            <label htmlFor="code-bon">Code du bon ou de la carte cadeau</label>
+            <input
+              id="code-bon"
+              autoFocus
+              value={codeBon}
+              placeholder={`CAD-${new Date().getFullYear()}-000001`}
+              onChange={(e) => setCodeBon(e.target.value.toUpperCase())}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && codeBon.trim()) void accepterBon(codeBon);
+                if (e.key === 'Escape') setCodeBon(null);
+              }}
+            />
+            <div className="rangee" style={{ marginTop: 8 }}>
+              <button style={{ flex: 1 }} onClick={() => setCodeBon(null)}>Annuler</button>
+              <button
+                className="principal"
+                style={{ flex: 1 }}
+                disabled={!codeBon.trim()}
+                onClick={() => void accepterBon(codeBon)}
+              >
+                Valider le bon
+              </button>
+            </div>
+          </div>
+        )}
+
         {reglements.length > 0 && (
           <table style={{ marginTop: 16 }}>
             <tbody>
               {reglements.map((r, i) => (
                 <tr key={i}>
-                  <td>{LIBELLES[r.mode]}</td>
+                  <td>
+                    {LIBELLES[r.mode]}
+                    {r.reference && <span className="discret"> {r.reference}</span>}
+                  </td>
                   <td className="nombre">{formater(r.montantCentimes)} DA</td>
                   <td style={{ width: 60 }}>
                     <button onClick={() => setReglements((l) => l.filter((_, j) => j !== i))}>
@@ -226,6 +314,16 @@ export function Paiement({
             </div>
           )}
         </div>
+
+        {client && points && points.points > 0 && (
+          <p className="discret" style={{ marginTop: 0 }}>
+            {points.points} point{points.points > 1 ? 's' : ''} de fidelite —{' '}
+            {formater(points.valeurCentimes)} DA
+            {points.points < points.bareme.minimumUtilisation
+              ? ` (il en faut ${points.bareme.minimumUtilisation} pour un bon)`
+              : ' — echangeables contre un bon au comptoir'}
+          </p>
+        )}
 
         {erreur && <div className="message erreur">{erreur}</div>}
 

@@ -8,6 +8,7 @@ import { AuditService } from '../audit/audit.service';
 import { StocksService } from '../stocks/stocks.service';
 import { TiersService } from '../tiers/tiers.service';
 import { TresorerieService } from '../tresorerie/tresorerie.service';
+import { FideliteService } from '../fidelite/fidelite.service';
 import { b, c } from '../commun/bigint';
 import { margeLigne, type TicketSync } from '@gestglobale/shared';
 
@@ -33,6 +34,7 @@ export class VentesService {
     private readonly stocks: StocksService,
     private readonly tiers: TiersService,
     private readonly tresorerie: TresorerieService,
+    private readonly fidelite: FideliteService,
   ) {}
 
   /**
@@ -252,6 +254,25 @@ export class VentesService {
           },
           tx,
         );
+      } else if (reglement.mode === 'BON_ACHAT') {
+        // Le solde du serveur fait foi. Si la caisse a accepte davantage
+        // pendant une coupure, la vente tient et l'ecart est consigne.
+        if (!reglement.reference) {
+          throw new BadRequestException(
+            'Un reglement par bon d\u2019achat doit porter le code du bon',
+          );
+        }
+        await this.fidelite.enregistrerUsage(
+          {
+            code: reglement.reference,
+            documentNumero: ticket.numero,
+            montantCentimes: reglement.montantCentimes,
+            horsLigne: ticket.horsLigne,
+            utilisateurId: ticket.utilisateurId,
+            date: new Date(ticket.dateVente),
+          },
+          tx,
+        );
       } else if (reglement.mode === 'ESPECES' && compteTiroir) {
         await this.tresorerie.enregistrer(
           {
@@ -271,6 +292,19 @@ export class VentesService {
           tx,
         );
       }
+    }
+
+    // Fidelite : les points sont acquis sur le montant reellement paye.
+    if (ticket.clientId && !estRetour) {
+      await this.fidelite.crediterPoints(
+        {
+          clientId: ticket.clientId,
+          documentNumero: ticket.numero,
+          montantTtcCentimes: ticket.totalTtcCentimes,
+          magasinId: contexte.magasinId,
+        },
+        tx,
+      );
     }
 
     return tx.documentVente.update({

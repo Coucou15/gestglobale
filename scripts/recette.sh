@@ -68,6 +68,11 @@ liberer_le_port
 couleur '1/7  Construction'
 ( cd "$RACINE/packages/shared" && pnpm build >/dev/null )
 ( cd "$API" && npx prisma generate >/dev/null && npx nest build >/dev/null )
+# La caisse aussi : les etapes Electron lancent le code compile de
+# dist/, pas les sources. Sans cette construction, la recette validait
+# le dernier build en date et pouvait donc declarer bonne une version
+# que personne n'avait ecrite.
+( cd "$POS" && pnpm build >/dev/null )
 
 couleur '2/7  Noyau metier (hors base, hors reseau)'
 ( cd "$RACINE/packages/shared" && npx vitest run )

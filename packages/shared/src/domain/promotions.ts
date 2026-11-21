@@ -236,3 +236,122 @@ export function valeurDesPoints(
   if (!bareme.actif || points < bareme.minimumUtilisation) return 0;
   return arrondi(points * bareme.valeurPointCentimes);
 }
+
+/* ------------------------------------------------------------------ */
+/* Cartes cadeaux et bons d'achat                                      */
+/* ------------------------------------------------------------------ */
+
+export interface BonConnu {
+  code: string;
+  soldeCentimes: Centimes;
+  expireLe: string | null;
+  actif: boolean;
+}
+
+export type MotifRefusBon =
+  | 'INCONNU'
+  | 'ANNULE'
+  | 'EXPIRE'
+  | 'EPUISE';
+
+export interface DecisionBon {
+  accepte: boolean;
+  motif: MotifRefusBon | null;
+  message: string | null;
+  /** Montant que le bon couvre reellement. */
+  montantUtiliseCentimes: Centimes;
+  /** Part du montant presente que le bon ne couvre pas. */
+  resteAPayerCentimes: Centimes;
+  soldeApresCentimes: Centimes;
+  /**
+   * Somme acceptee au-dela du solde connu hors ligne.
+   *
+   * Un bon est de l'argent au porteur : pendant une coupure, la caisse ne
+   * peut pas savoir si une autre caisse vient de le depenser. Refuser
+   * serait penible pour le client et la marchandise est deja prise ; on
+   * accepte donc jusqu'au solde connu, et tout decouvert est signale au
+   * gerant a la remontee.
+   */
+  decouvertCentimes: Centimes;
+}
+
+/**
+ * Un bon couvre-t-il le montant presente ?
+ *
+ * @param montantCentimes montant que le caissier veut regler avec ce bon
+ * @param maintenant      instant de la vente, pour l'expiration
+ */
+export function evaluerBon(
+  bon: BonConnu | null,
+  montantCentimes: Centimes,
+  maintenant = new Date(),
+): DecisionBon {
+  const refus = (motif: MotifRefusBon, message: string): DecisionBon => ({
+    accepte: false,
+    motif,
+    message,
+    montantUtiliseCentimes: 0,
+    resteAPayerCentimes: montantCentimes,
+    soldeApresCentimes: bon?.soldeCentimes ?? 0,
+    decouvertCentimes: 0,
+  });
+
+  if (!bon) return refus('INCONNU', 'Bon inconnu de cette caisse');
+  if (!bon.actif) return refus('ANNULE', 'Ce bon a ete annule');
+
+  if (bon.expireLe) {
+    const expiration = new Date(bon.expireLe);
+    if (!Number.isNaN(expiration.getTime()) && expiration < maintenant) {
+      return refus('EXPIRE', `Bon expire le ${expiration.toLocaleDateString('fr-DZ')}`);
+    }
+  }
+  if (bon.soldeCentimes <= 0) return refus('EPUISE', 'Ce bon n’a plus de solde');
+
+  const utilise = Math.min(bon.soldeCentimes, Math.max(0, montantCentimes));
+  return {
+    accepte: utilise > 0,
+    motif: null,
+    message: null,
+    montantUtiliseCentimes: utilise,
+    resteAPayerCentimes: montantCentimes - utilise,
+    soldeApresCentimes: bon.soldeCentimes - utilise,
+    decouvertCentimes: 0,
+  };
+}
+
+/**
+ * Applique un usage de bon au solde reellement constate au serveur.
+ *
+ * C'est ici que se revele un bon depense deux fois pendant une coupure :
+ * le solde reel ne couvre plus ce que la caisse a accepte. La vente
+ * tient — le client est parti avec la marchandise — et l'ecart est
+ * rendu pour etre porte au rapport du gerant.
+ */
+export function appliquerUsageBon(
+  soldeReelCentimes: Centimes,
+  montantAccepteCentimes: Centimes,
+  options: {
+    /**
+     * Faux quand le bon etait deja annule ou expire au moment de la
+     * vente. La caisse hors ligne ne pouvait pas le savoir ; le serveur,
+     * lui, le sait. Il ne debite alors rien — le solde d'une carte
+     * declaree perdue doit rester intact pour le client qui la
+     * remplacera — et porte la totalite au rapport des depassements.
+     */
+    valable?: boolean;
+  } = {},
+): { debiteCentimes: Centimes; soldeApresCentimes: Centimes; decouvertCentimes: Centimes } {
+  if (options.valable === false) {
+    return {
+      debiteCentimes: 0,
+      soldeApresCentimes: soldeReelCentimes,
+      decouvertCentimes: Math.max(0, montantAccepteCentimes),
+    };
+  }
+  const debite = Math.max(0, Math.min(soldeReelCentimes, montantAccepteCentimes));
+  return {
+    debiteCentimes: debite,
+    soldeApresCentimes: soldeReelCentimes - debite,
+    decouvertCentimes: montantAccepteCentimes - debite,
+  };
+}

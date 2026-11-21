@@ -24,7 +24,7 @@ a venir = non commence.
 | M7 | Tresorerie | 1 | **fait** — depenses, salaires, apports, retraits et transferts a double validation |
 | M8 | Utilisateurs et droits | 1 | **fait** |
 | M9 | Tableaux de bord et rapports | 2 | *partiel* — chiffres du jour, rapport de periode, top et flop produits, produits dormants, ecarts de caisse, stocks negatifs ; exports Excel et PDF et resume quotidien a faire |
-| M10 | Fidelite et promotions | 2 | *partiel* — promotions appliquees en caisse, hors ligne comprise, et gerees au back-office ; cartes cadeaux et bons d'achat a faire |
+| M10 | Fidelite et promotions | 2 | **fait** — promotions, points de fidelite, cartes cadeaux et bons d'achat, appliques en caisse hors ligne comprise |
 | M11 | Multi-magasins | 2 | *partiel* — catalogue central, prix par magasin et transferts faits ; consolidation a completer |
 | M12 | Comptabilite et exports | 3 | *partiel* — historique de l'ancien logiciel repris et consultable ; journaux et etats fiscaux a faire |
 | M13 | Gestion du personnel | 3 | *partiel* — modele de donnees complet ; fonctionnalites a faire |
@@ -91,6 +91,44 @@ cinq echecs, double authentification obligatoire depuis Internet,
 deconnexion apres 15 minutes d'inactivite, journal d'audit chaine par
 empreintes avec verification d'integrite.
 
+### Detail du module du lot 2 deja livre
+
+**M10 — Promotions, fidelite, cartes cadeaux.** Quatre sortes de
+promotions (prix barre, X achetes Y offerts, remise par famille, happy
+hour avec plage horaire pouvant franchir minuit), declarees au
+back-office et appliquees par les caisses meme sans reseau. Les
+promotions non cumulables se resolvent toujours en faveur du client, et
+le resultat ne depend pas de l'ordre dans lequel elles ont ete saisies.
+
+Les points de fidelite se creditent a chaque ticket nominatif selon un
+bareme parametrable par magasin, et se depensent en les convertissant en
+bon d'achat : un bon porte un code, une date, un emetteur et une trace
+de chaque passage, ce qu'une remise en points n'aurait pas. Les cartes
+cadeaux s'emettent par lots de 200 au plus, avec ou sans expiration, et
+s'annulent avec motif en cas de perte.
+
+**Une carte cadeau est de l'argent au porteur**, et c'est la que se joue
+l'essentiel. Une caisse privee de reseau ne connait que le solde de sa
+derniere synchronisation : si deux caisses acceptent la meme carte
+pendant la meme coupure, elle est depensee deux fois. On ne peut pas
+l'eviter sans refuser les bons pendant les coupures, ce que la section 4
+interdit en substance. Le logiciel garantit donc ce qui peut l'etre :
+
+- les deux ventes tiennent — la marchandise est partie, le client est
+  dehors ;
+- le solde ne devient jamais negatif, ni en caisse ni au serveur ;
+- le manque remonte au centime dans un rapport destine au gerant, avec
+  le ticket, la caisse et la mention « hors ligne » pour qu'il sache
+  qu'aucun caissier n'a faute ;
+- une carte annulee acceptee par une caisse en retard de synchronisation
+  ne voit **pas** son solde partir : le client qui a declare sa carte
+  perdue en recevra une autre du meme montant, et la totalite de la
+  vente apparait au rapport.
+
+Un code que la caisse n'a jamais vu est en revanche refuse : elle
+n'invente pas d'argent. Le message invite alors a synchroniser, car le
+bon vient peut-etre d'etre emis.
+
 ---
 
 ## 2. Exigences non fonctionnelles
@@ -121,6 +159,7 @@ empreintes avec verification d'integrite.
 | Valeur du stock au CUMP et soldes tiers identiques a l'ancien logiciel | **controles identiques au centime pres** entre le fichier et la base ; reste a les comparer avec l'ancien logiciel |
 | Une journee type (environ 430 tickets sur 2 caisses) rejouee sans erreur | **verifie** — 430 tickets et 2 780 lignes rejoues sur 30 015 articles |
 | Coupure reseau de 2 heures : 100 % des tickets retrouves, sans doublon | **verifie** |
+| Une carte cadeau acceptee par deux caisses pendant la meme coupure : les deux ventes tiennent, le solde ne passe pas en negatif, le manque est signale au centime | **verifie** — deux bases locales reelles et un serveur reel |
 | Cloture Z avec comptage, ecart calcule et justifie | **verifie** |
 | Un caissier sans droit ne peut ni annuler, ni modifier un prix, ni voir les marges | **verifie** |
 | Consultation des ventes du jour depuis un smartphone hors du magasin | **verifie** en navigateur mobile ; reste a eprouver via le tunnel |
