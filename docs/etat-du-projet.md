@@ -23,7 +23,7 @@ a venir = non commence.
 | M6 | Tiers | 1 | **fait** |
 | M7 | Tresorerie | 1 | **fait** — depenses, salaires, apports, retraits et transferts a double validation |
 | M8 | Utilisateurs et droits | 1 | **fait** |
-| M9 | Tableaux de bord et rapports | 2 | *partiel* — chiffres du jour, rapport de periode, top et flop produits, produits dormants, ecarts de caisse, stocks negatifs ; exports Excel et PDF et resume quotidien a faire |
+| M9 | Tableaux de bord et rapports | 2 | **fait** — sept rapports, chacun exportable en Excel et en PDF, et resume quotidien du gerant ; reste a fournir un relais de messagerie pour l'envoi |
 | M10 | Fidelite et promotions | 2 | **fait** — promotions, points de fidelite, cartes cadeaux et bons d'achat, appliques en caisse hors ligne comprise |
 | M11 | Multi-magasins | 2 | *partiel* — catalogue central, prix par magasin et transferts faits ; consolidation a completer |
 | M12 | Comptabilite et exports | 3 | *partiel* — historique de l'ancien logiciel repris et consultable ; journaux et etats fiscaux a faire |
@@ -92,6 +92,40 @@ deconnexion apres 15 minutes d'inactivite, journal d'audit chaine par
 empreintes avec verification d'integrite.
 
 ### Detail du module du lot 2 deja livre
+
+**M9 — Tableaux de bord et rapports.** Sept rapports, tous exportables
+en Excel et en PDF.
+
+La synthese donne le chiffre d'affaires, la marge, le nombre de tickets
+et le panier moyen, declines par jour, par heure, par caisse, par
+caissier et par rayon et famille — les axes que demande la section 9.
+Viennent ensuite le palmares des ventes, les produits dormants, les
+ruptures et franchissements de seuil, les produits vendus sous leur
+CUMP, les ecarts de caisse par caissier, et le journal des annulations
+et des remises.
+
+Les trois formes — ecran, Excel, PDF — sortent d'une **seule description
+par rapport**. C'est deliberé : des exports decrits a part finissent
+toujours par s'ecarter de ce que montre l'ecran, et le gerant ne sait
+plus lequel croire. Ici le fichier ne peut pas diverger.
+
+Dans l'Excel, les montants sont des nombres au format comptable, pas du
+texte : le comptable peut sommer et filtrer. L'entete est figee et un
+filtre automatique est pose. Le PDF est en A4 paysage — le journal des
+remises a dix colonnes, illisibles en portrait — et produit sans
+navigateur, parce qu'installer Chromium sur le ProLiant du client pour
+fabriquer un PDF serait disproportionne.
+
+**Le resume quotidien** part chaque matin au gerant a l'heure qu'il
+choisit : recette, marge, tickets, panier moyen, reglements, heure la
+plus forte, puis les points de vigilance — clotures manquantes, ecarts
+de caisse, ecarts sans motif, annulations, ventes a perte, ruptures. Il
+est **toujours produit et conserve**, meme sans relais de messagerie :
+le gerant le retrouve alors dans le back-office, et la raison de son
+non-envoi y figure. Un rapport qu'on ne peut pas envoyer vaut mieux
+qu'un rapport qui n'existe pas — c'est precisement ce que le client
+reprochait a son ancien logiciel, dont les chiffres n'arrivaient nulle
+part.
 
 **M10 — Promotions, fidelite, cartes cadeaux.** Quatre sortes de
 promotions (prix barre, X achetes Y offerts, remise par famille, happy
@@ -163,6 +197,7 @@ bon vient peut-etre d'etre emis.
 | Cloture Z avec comptage, ecart calcule et justifie | **verifie** |
 | Un caissier sans droit ne peut ni annuler, ni modifier un prix, ni voir les marges | **verifie** |
 | Consultation des ventes du jour depuis un smartphone hors du magasin | **verifie** en navigateur mobile ; reste a eprouver via le tunnel |
+| Rapport mensuel rendu en moins de 5 secondes | **verifie au volume reel** — 15 ms pour la synthese, 287 ms pour les ruptures sur 30 000 articles ; les exports Excel et PDF tiennent sous 250 ms |
 | Restauration complete depuis la sauvegarde de la veille en moins d'une heure | **a eprouver** a l'installation |
 
 ---
@@ -202,6 +237,15 @@ continuer, mais chacun changera du code s'il est tranche plus tard.
    processeur installe, quantite de memoire, type de controleur RAID et
    etat des disques du ProLiant ML330 G6.
 
+8. **Relais de messagerie pour le resume quotidien.** Le resume est
+   produit et conserve chaque matin, mais il ne peut pas partir sans un
+   relais : adresse du serveur, port, identifiants, adresse
+   d'expedition. Faute de messagerie d'entreprise, deux solutions
+   existent — un compte d'envoi chez votre fournisseur d'acces, ou un
+   envoi par WhatsApp, qui demanderait un developpement supplementaire.
+   Dites-nous aussi a quelle heure vous voulez le recevoir, et a quelles
+   adresses.
+
 ---
 
 ## 5. Prochaines etapes proposees
@@ -212,8 +256,10 @@ continuer, mais chacun changera du code s'il est tranche plus tard.
 2. Executer l'installateur sur une vraie machine Windows, avec sa
    douchette, son imprimante et son tiroir. Voir
    [`installer-la-caisse.md`](installer-la-caisse.md).
-3. Ajouter une generation PDF cote serveur, pour envoyer les factures par
-   courriel sans intervention humaine.
+3. Obtenir le relais de messagerie, pour que le resume quotidien parte
+   vraiment et que les factures puissent etre envoyees sans intervention
+   humaine. La fabrication du PDF cote serveur est desormais en place
+   pour les rapports ; l'etendre aux factures est court.
 4. Refaire le test de charge sur le serveur du client : le ProLiant
    ML330 G6 n'a pas de SSD et les durees y seront moins bonnes que dans
    l'environnement de developpement.

@@ -1,4 +1,7 @@
-import { formaterDA, formaterQuantite, type UniteMesure, type TicketSync } from '@gestglobale/shared';
+import {
+  formaterDA, formaterQuantite, libelleModePaiement,
+  type UniteMesure, type TicketSync,
+} from '@gestglobale/shared';
 
 /**
  * Composition du ticket pour une imprimante thermique 80 mm (M4).
@@ -116,7 +119,7 @@ export function composerTicket(
   lignes.push('');
 
   for (const reglement of ticket.reglements) {
-    lignes.push(deuxColonnes(libelleMode(reglement.mode), formaterDA(reglement.montantCentimes, { devise: false })));
+    lignes.push(deuxColonnes(libelleModePaiement(reglement.mode), formaterDA(reglement.montantCentimes, { devise: false })));
   }
   if (ticket.renduCentimes > 0) {
     lignes.push(deuxColonnes('Rendu', formaterDA(ticket.renduCentimes, { devise: false })));
@@ -143,18 +146,6 @@ export function composerTicket(
   lignes.push('');
 
   return lignes.join('\n');
-}
-
-function libelleMode(mode: string): string {
-  switch (mode) {
-    case 'ESPECES': return 'Especes';
-    case 'CARTE': return 'Carte (TPE)';
-    case 'CHEQUE': return 'Cheque';
-    case 'CREDIT': return 'A credit';
-    case 'BON_ACHAT': return "Bon d'achat";
-    case 'VIREMENT': return 'Virement';
-    default: return mode;
-  }
 }
 
 /** Commandes ESC/POS : initialisation, texte, coupe, ouverture du tiroir. */

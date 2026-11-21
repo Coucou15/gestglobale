@@ -356,6 +356,22 @@ async function main(): Promise<void> {
     },
   });
 
+  await prisma.parametre.create({
+    data: {
+      cle: 'rapports.resumeQuotidien',
+      valeur: {
+        // Desactive tant que le client n'a pas fourni de relais de
+        // messagerie. Le resume est produit et conserve quand meme : le
+        // gerant le lit dans le back-office.
+        actif: false,
+        heure: 7,
+      },
+      description:
+        "Resume quotidien du gerant (M9). Renseignez hote, port, utilisateur, "
+        + "motDePasse et expediteur, puis passez actif a true.",
+    },
+  });
+
   // --- Cartes cadeaux et bons d'achat (M10) ------------------------------
   // Trois cartes de 1 000 DA et deux bons de 500 DA, de quoi essayer un
   // reglement par bon en caisse, hors ligne comme en ligne.

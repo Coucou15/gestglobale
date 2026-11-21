@@ -124,3 +124,23 @@ export function analyserNumeroDocument(numero: string): {
   if (!m) return null;
   return { codeMagasin: m[1], numeroCaisse: Number(m[2]), compteur: Number(m[3]) };
 }
+
+/**
+ * Nom lisible d'un mode de reglement.
+ *
+ * Le ticket imprime, le rapport du gerant et l'ecran de caisse doivent
+ * nommer la meme chose de la meme facon : un gerant qui lit « A credit »
+ * sur son rapport et « CREDIT » sur le ticket doute, a juste titre, de
+ * lire la meme donnee.
+ */
+export function libelleModePaiement(mode: string): string {
+  switch (mode) {
+    case 'ESPECES': return 'Especes';
+    case 'CARTE': return 'Carte (TPE)';
+    case 'CHEQUE': return 'Cheque';
+    case 'CREDIT': return 'A credit';
+    case 'BON_ACHAT': return "Bon d'achat";
+    case 'VIREMENT': return 'Virement';
+    default: return mode;
+  }
+}

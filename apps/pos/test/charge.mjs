@@ -319,6 +319,66 @@ async function main() {
     appel('/caisse/ecarts?jours=30', gerant.jeton));
   verifierUnique('Ecarts de caisse sur 30 jours', dureeEcarts, 5000);
 
+  // Rapports ajoutes par M9. Les ruptures balayent tout le stock, et les
+  // ventes a perte toutes les lignes du mois : ce sont les deux qui
+  // pouvaient devenir lentes au volume reel.
+  const { duree: dureeRuptures } = await chrono(() =>
+    appel('/rapports/ruptures', gerant.jeton));
+  verifierUnique('Ruptures sur tout le catalogue', dureeRuptures, 5000);
+
+  const { duree: dureePerte } = await chrono(() =>
+    appel('/rapports/ventes-a-perte', gerant.jeton));
+  verifierUnique('Produits vendus a perte sur le mois', dureePerte, 5000);
+
+  const { duree: dureeEcartsM9 } = await chrono(() =>
+    appel('/rapports/ecarts-de-caisse?jours=30', gerant.jeton));
+  verifierUnique('Ecarts de caisse par caissier sur 30 jours', dureeEcartsM9, 5000);
+
+  const { duree: dureeJournal } = await chrono(() =>
+    appel('/rapports/annulations-et-remises', gerant.jeton));
+  verifierUnique('Journal des annulations et remises du mois', dureeJournal, 5000);
+
+  // ----------------------------------------------------------------
+  titre('7 bis. Exports Excel et PDF au volume reel');
+
+  // Produire un fichier coute plus que produire du JSON : le classeur
+  // est assemble feuille par feuille et le PDF ligne par ligne. Si un
+  // export depassait la minute, le gerant renoncerait a s'en servir.
+  for (const [nom, libelle] of [
+    ['periode', 'Synthese du mois'],
+    ['ruptures', 'Ruptures'],
+    ['produits', 'Palmares'],
+  ]) {
+    for (const format of ['xlsx', 'pdf']) {
+      const { duree, resultat } = await chrono(async () => {
+        const reponse = await fetch(
+          `${BASE_API}/rapports/${nom}/export.${format}`,
+          { headers: { Authorization: `Bearer ${gerant.jeton}` } },
+        );
+        if (!reponse.ok) throw new Error(`${nom}.${format} : ${reponse.status}`);
+        return Buffer.from(await reponse.arrayBuffer());
+      });
+      verifierUnique(
+        `${libelle} en ${format} (${Math.round(resultat.length / 1024)} Ko)`,
+        duree, 10000,
+      );
+    }
+  }
+
+  const { duree: dureeResume } = await chrono(async () => {
+    const reponse = await fetch(`${BASE_API}/rapports/resumes`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${gerant.jeton}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ jour: new Date().toISOString().slice(0, 10) }),
+    });
+    if (!reponse.ok) throw new Error(`resume : ${reponse.status}`);
+    return reponse.json();
+  });
+  verifierUnique('Resume quotidien du gerant', dureeResume, 10000);
+
   const { duree: dureeAlertes } = await chrono(() => appel('/stocks/alertes', gerant.jeton));
   verifierUnique('Alertes de reassort', dureeAlertes, 5000);
 

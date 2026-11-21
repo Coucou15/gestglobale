@@ -9,6 +9,7 @@ import { Achats } from './pages/Achats';
 import { Documents } from './pages/Documents';
 import { Promotions } from './pages/Promotions';
 import { Fidelite } from './pages/Fidelite';
+import { Rapports } from './pages/Rapports';
 import { Inventaires } from './pages/Inventaires';
 import { Caisses } from './pages/Caisses';
 import { Tiers } from './pages/Tiers';
@@ -30,6 +31,7 @@ const ENTREES = [
   { chemin: '/articles', libelle: 'Articles', droit: 'article.voir' },
   { chemin: '/stocks', libelle: 'Stocks', droit: 'stock.voir' },
   { chemin: '/promotions', libelle: 'Promotions', droit: 'article.voir' },
+  { chemin: '/rapports', libelle: 'Rapports', droit: 'rapport.son_magasin' },
   { chemin: '/fidelite', libelle: 'Fidelite et bons', droit: 'tiers.voir' },
   { chemin: '/documents', libelle: 'Factures et BL', droit: 'rapport.son_magasin' },
   { chemin: '/achats', libelle: 'Receptions', droit: 'achat.voir' },
@@ -131,6 +133,7 @@ export function Application() {
             ['/articles', 'article.voir', <Articles utilisateur={utilisateur} />],
             ['/stocks', 'stock.voir', <Stocks />],
             ['/promotions', 'article.voir', <Promotions utilisateur={utilisateur} />],
+            ['/rapports', 'rapport.son_magasin', <Rapports utilisateur={utilisateur} />],
             ['/fidelite', 'tiers.voir', <Fidelite utilisateur={utilisateur} />],
             ['/documents', 'rapport.son_magasin', <Documents utilisateur={utilisateur} />],
             ['/achats', 'achat.voir', <Achats utilisateur={utilisateur} />],

@@ -126,6 +126,46 @@ export async function ouvrirImpression(chemin: string): Promise<void> {
   window.setTimeout(() => URL.revokeObjectURL(adresse), 60000);
 }
 
+/**
+ * Telecharge un fichier produit par l'API.
+ *
+ * Les routes d'export sont protegees par un jeton Bearer, qu'un simple
+ * lien <a href> ne porte pas : un clic dessus donnerait un 401. On va
+ * donc chercher le fichier soi-meme, puis on declenche la sauvegarde
+ * depuis un Blob local.
+ */
+export async function telecharger(chemin: string): Promise<string> {
+  const reponse = await fetch(`${BASE}${chemin}`, {
+    headers: { ...(jeton() ? { Authorization: `Bearer ${jeton()}` } : {}) },
+  });
+  if (!reponse.ok) {
+    let message = `Telechargement impossible (erreur ${reponse.status})`;
+    try {
+      const donnees = await reponse.json();
+      if (donnees?.message) message = String(donnees.message);
+    } catch {
+      // Le corps n'est pas du JSON : on garde le message generique.
+    }
+    throw new ErreurApi(reponse.status, message);
+  }
+
+  // Le serveur propose un nom dans Content-Disposition ; sans accent ni
+  // espace, justement pour survivre au trajet jusqu'au disque.
+  const entete = reponse.headers.get('Content-Disposition') ?? '';
+  const nom = /filename="([^"]+)"/.exec(entete)?.[1] ?? 'export';
+
+  const blob = await reponse.blob();
+  const adresse = URL.createObjectURL(blob);
+  const lien = document.createElement('a');
+  lien.href = adresse;
+  lien.download = nom;
+  document.body.appendChild(lien);
+  lien.click();
+  lien.remove();
+  window.setTimeout(() => URL.revokeObjectURL(adresse), 30000);
+  return nom;
+}
+
 export function formaterDA(centimes: number | undefined | null): string {
   const valeur = (centimes ?? 0) / 100;
   return valeur.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' DA';

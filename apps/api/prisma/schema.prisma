@@ -71,6 +71,7 @@ model Magasin {
   tiersInternes       Tiers[]
   receptions          Reception[]
   plannings           Planning[]
+  resumesQuotidiens   ResumeQuotidien[]
 
   @@index([societeId])
 }
@@ -1683,6 +1684,33 @@ model AnomalieImport {
 }
 
 /// Parametres. magasinId nul = valeur globale, sinon surcharge du magasin.
+/// Resume quotidien envoye au gerant (M9, section 9).
+///
+/// Le resume est toujours produit et conserve, meme quand aucun relais
+/// de messagerie n'est configure : le gerant le retrouve alors dans le
+/// back-office. Un rapport qu'on ne peut pas envoyer vaut mieux qu'un
+/// rapport qui n'existe pas.
+model ResumeQuotidien {
+  id            String   @id @default(uuid())
+  magasinId     String
+  /// Jour couvert par le resume, a minuit.
+  jour          DateTime
+  /// Chiffres du jour, tels que presentes dans le courriel.
+  donnees       Json
+  /// Corps du message, en texte simple, tel qu'il a ete envoye.
+  texte         String
+  destinataires String[]
+  envoyeLe      DateTime?
+  /// Renseigne quand l'envoi a echoue : le resume reste consultable.
+  erreurEnvoi   String?
+  creeLe        DateTime @default(now())
+
+  magasin Magasin @relation(fields: [magasinId], references: [id])
+
+  @@unique([magasinId, jour])
+  @@index([jour])
+}
+
 model Parametre {
   id          String   @id @default(uuid())
   cle         String

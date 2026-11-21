@@ -528,7 +528,181 @@ async function main() {
   verifier('Une nouvelle session peut s\'ouvrir apres la cloture',
     reouverture.statut === 201 || reouverture.statut === 200);
 
-  titre('11. Journal d\'audit');
+  titre('11. Rapports, exports et resume quotidien (M9)');
+
+  const moisDebut = new Date(Date.UTC(new Date().getFullYear(), new Date().getMonth(), 1));
+  const moisFin = new Date(Date.UTC(new Date().getFullYear(), new Date().getMonth() + 1, 1));
+  const surLeMois = `debut=${moisDebut.toISOString()}&fin=${moisFin.toISOString()}`;
+
+  const synthese = await appel(`/rapports/periode?${surLeMois}`, { jeton: jetonGerant });
+  verifier('La synthese de periode repond', synthese.statut === 200);
+
+  // La section 9 exige le CA par jour, heure, caisse, caissier, magasin,
+  // rayon et famille. On verifie que chaque axe est bien la.
+  for (const axe of ['parJour', 'parHeure', 'parCaisse', 'parCaissier', 'parFamille']) {
+    verifier(`La synthese porte l\'axe « ${axe} »`,
+      Array.isArray(synthese.donnees?.[axe]) && synthese.donnees[axe].length > 0,
+      JSON.stringify(synthese.donnees?.[axe]?.[0] ?? null)?.slice(0, 80));
+  }
+
+  // Les axes doivent se recouper : la somme par caisse doit faire le total.
+  const sommeParCaisse = (synthese.donnees?.parCaisse ?? [])
+    .reduce((t, c) => t + Number(c.chiffreAffairesCentimes), 0);
+  verifier('La somme par caisse egale le chiffre d\'affaires total',
+    sommeParCaisse === Number(synthese.donnees?.chiffreAffairesTtcCentimes),
+    `${sommeParCaisse} contre ${synthese.donnees?.chiffreAffairesTtcCentimes}`);
+
+  const sommeParHeure = (synthese.donnees?.parHeure ?? [])
+    .reduce((t, h) => t + Number(h.chiffreAffairesCentimes), 0);
+  verifier('La somme par heure egale le chiffre d\'affaires total',
+    sommeParHeure === Number(synthese.donnees?.chiffreAffairesTtcCentimes),
+    `${sommeParHeure} contre ${synthese.donnees?.chiffreAffairesTtcCentimes}`);
+
+  const panier = Math.round(
+    Number(synthese.donnees.chiffreAffairesTtcCentimes) / synthese.donnees.nombreTickets,
+  );
+  verifier('Le panier moyen est le quotient exact',
+    synthese.donnees.panierMoyenCentimes === panier,
+    `${synthese.donnees.panierMoyenCentimes} contre ${panier}`);
+
+  const ruptures = await appel('/rapports/ruptures', { jeton: jetonGerant });
+  verifier('Les ruptures sont listees', ruptures.statut === 200
+    && Array.isArray(ruptures.donnees));
+  verifier('Une rupture se distingue d\'un franchissement de seuil',
+    (ruptures.donnees ?? []).every((r) => r.rupture === (r.stockMilli <= 0)));
+
+  const perte = await appel(`/rapports/ventes-a-perte?${surLeMois}`, { jeton: jetonGerant });
+  verifier('Les ventes a perte sont calculees', perte.statut === 200);
+  verifier('Aucune vente du jeu d\'essai n\'est sous son CUMP',
+    perte.donnees?.nombreLignes === 0, `${perte.donnees?.nombreLignes} ligne(s)`);
+
+  const ecarts = await appel('/rapports/ecarts-de-caisse?jours=30', { jeton: jetonGerant });
+  verifier('Les ecarts de caisse sont repartis par caissier',
+    ecarts.statut === 200 && (ecarts.donnees?.parCaissier?.length ?? 0) > 0);
+
+  // La cloture du chapitre 10 a laisse un ecart volontaire : il doit se
+  // retrouver ici au centime, et porter sa justification.
+  const clotureVue = (ecarts.donnees?.clotures ?? [])
+    .find((z) => z.numero === cloture.donnees?.cloture?.numero);
+  verifier('L\'ecart de la cloture Z se retrouve dans le rapport, au centime',
+    clotureVue !== undefined
+      && Number(clotureVue.ecartCentimes) === ecartAttendu,
+    `${clotureVue?.ecartCentimes} contre ${ecartAttendu}`);
+  verifier('Sa justification est conservee',
+    typeof clotureVue?.justification === 'string' && clotureVue.justification.length > 0,
+    clotureVue?.justification ?? '');
+  verifier('Elle n\'est donc pas comptee comme non justifiee',
+    (ecarts.donnees?.parCaissier ?? []).every((p) => p.nombreNonJustifies === 0));
+
+  const journal = await appel(`/rapports/annulations-et-remises?${surLeMois}`,
+    { jeton: jetonGerant });
+  verifier('Le journal des annulations et remises repond', journal.statut === 200);
+  verifier('Il distingue les remises par caissier du detail ligne a ligne',
+    Array.isArray(journal.donnees?.remisesParCaissier)
+      && Array.isArray(journal.donnees?.remises)
+      && Array.isArray(journal.donnees?.annulations));
+
+  // Un caissier ne doit pas pouvoir lire les rapports du magasin.
+  const refuse = await appel('/rapports/ecarts-de-caisse', { jeton: jetonCaissier });
+  verifier('Un caissier n\'accede pas aux rapports du magasin',
+    refuse.statut === 403, `statut ${refuse.statut}`);
+
+  titre('12. Exports Excel et PDF (M9)');
+
+  const RAPPORTS = [
+    'periode', 'produits', 'dormants', 'ruptures',
+    'ventes-a-perte', 'ecarts-de-caisse', 'annulations-et-remises',
+  ];
+
+  for (const nom of RAPPORTS) {
+    for (const format of ['xlsx', 'pdf']) {
+      const reponse = await fetch(
+        `${BASE}/rapports/${nom}/export.${format}?${surLeMois}`,
+        { headers: { Authorization: `Bearer ${jetonGerant}` } },
+      );
+      const octets = Buffer.from(await reponse.arrayBuffer());
+      // Signature du format : un fichier vide ou du JSON d'erreur ne
+      // passerait pas, alors qu'un simple code 200 ne dit rien.
+      const signature = format === 'xlsx'
+        ? octets.subarray(0, 2).toString() === 'PK'
+        : octets.subarray(0, 5).toString() === '%PDF-';
+      verifier(`${nom}.${format} est un fichier ${format} valide`,
+        reponse.status === 200 && signature && octets.length > 500,
+        `${reponse.status}, ${octets.length} octets`);
+
+      const disposition = reponse.headers.get('content-disposition') ?? '';
+      if (nom === 'periode') {
+        verifier(`${format} : le fichier est propose au telechargement, nomme sans accent`,
+          /attachment; filename="[a-z0-9-]+\.(xlsx|pdf)"/.test(disposition),
+          disposition);
+      }
+    }
+  }
+
+  const formatInconnu = await appel('/rapports/periode/export.csv', { jeton: jetonGerant });
+  verifier('Un format inconnu est refuse avec une explication',
+    formatInconnu.statut === 400
+      && String(formatInconnu.donnees?.message ?? '').includes('xlsx'),
+    formatInconnu.donnees?.message ?? '');
+
+  const rapportInconnu = await appel('/rapports/inexistant/export.pdf', { jeton: jetonGerant });
+  verifier('Un rapport inconnu est refuse en nommant les rapports offerts',
+    rapportInconnu.statut === 400
+      && String(rapportInconnu.donnees?.message ?? '').includes('ruptures'),
+    String(rapportInconnu.donnees?.message ?? '').slice(0, 60));
+
+  const periodeInverse = await appel(
+    '/rapports/periode?debut=2026-12-01T00:00:00Z&fin=2026-11-01T00:00:00Z',
+    { jeton: jetonGerant },
+  );
+  verifier('Une periode a l\'envers est refusee, pas silencieusement vide',
+    periodeInverse.statut === 400, `statut ${periodeInverse.statut}`);
+
+  titre('13. Resume quotidien du gerant (M9)');
+
+  const aujourdhui = new Date().toISOString().slice(0, 10);
+  const resume = await appel('/rapports/resumes', {
+    methode: 'POST', jeton: jetonGerant, corps: { jour: aujourdhui },
+  });
+  verifier('Le resume du jour se produit a la demande',
+    resume.statut === 201 || resume.statut === 200, `statut ${resume.statut}`);
+  verifier('Il porte la recette du jour',
+    String(resume.donnees?.texte ?? '').includes('Recette TTC'));
+  verifier('Il porte les points de vigilance',
+    ['Points de vigilance', 'Ecart de caisse', 'Ruptures']
+      .every((t) => String(resume.donnees?.texte ?? '').includes(t)));
+  verifier('Les modes de reglement y sont nommes en clair, comme sur le ticket',
+    String(resume.donnees?.texte ?? '').includes('Especes')
+      && !String(resume.donnees?.texte ?? '').includes('BON_ACHAT'));
+
+  // Sans relais de messagerie, le resume existe quand meme et dit
+  // pourquoi il n'est pas parti : c'est le defaut qu'on veut eviter.
+  verifier('Faute de relais, le resume est conserve et la raison consignee',
+    resume.donnees?.envoyeLe === null
+      && typeof resume.donnees?.erreurEnvoi === 'string'
+      && resume.donnees.erreurEnvoi.length > 0,
+    resume.donnees?.erreurEnvoi ?? '');
+
+  const rejeuResume = await appel('/rapports/resumes', {
+    methode: 'POST', jeton: jetonGerant, corps: { jour: aujourdhui },
+  });
+  verifier('Reproduire le resume du meme jour ne cree pas de doublon',
+    rejeuResume.donnees?.id === resume.donnees?.id,
+    `${resume.donnees?.id} puis ${rejeuResume.donnees?.id}`);
+
+  const liste = await appel('/rapports/resumes', { jeton: jetonGerant });
+  verifier('Le gerant retrouve ses resumes dans le back-office',
+    Array.isArray(liste.donnees) && liste.donnees.length >= 1,
+    `${liste.donnees?.length} resume(s)`);
+
+  const reglages = await appel('/rapports/resumes/reglages', { jeton: jetonGerant });
+  verifier('Les reglages d\'envoi sont lisibles',
+    reglages.statut === 200 && typeof reglages.donnees?.actif === 'boolean');
+  verifier('Le mot de passe du relais n\'est jamais renvoye',
+    reglages.donnees?.motDePasse === undefined,
+    'seul « motDePasseEnregistre » est expose');
+
+  titre('14. Journal d\'audit');
 
   const audit = await appel('/audit?taille=5', { jeton: jetonGerant });
   verifier('Le journal d\'audit enregistre les actions', (audit.donnees?.total ?? 0) > 0,
