@@ -32,6 +32,8 @@ export interface ResultatAnalyse {
     totalSoldesClientsCentimes: number;
     totalSoldesFournisseursCentimes: number;
     nombreCodesBarres: number;
+    nombreClients: number;
+    nombreFournisseurs: number;
     nombrePacks: number;
     nombreVracs: number;
     articlesStockNul: number;
@@ -81,7 +83,11 @@ interface ArticlePrepare {
   seuilAlerteMilli: number;
   rayon: string;
   famille: string;
+  familleLibelle: string;
   codeBarrePrincipal: string | null;
+  seuilDepotMilli: number;
+  capaciteDepotMilli: number | null;
+  capaciteVenteMilli: number | null;
   ligne: number;
 }
 
@@ -110,7 +116,10 @@ export class ImportService {
     donnees: {
       articles: ArticlePrepare[];
       codesBarres: Array<{ code: string; reference: string }>;
-      packs: Array<{ code: string; reference: string; nbUnites: number; prixCentimes: number }>;
+      packs: Array<{
+        code: string; reference: string; nbUnites: number; prixCentimes: number;
+        codeBarre: string | null;
+      }>;
       vracs: Array<{ code: string; reference: string; nom: string }>;
       clients: ReturnType<ImportService['preparerTiers']>;
       fournisseurs: ReturnType<ImportService['preparerTiers']>;
@@ -143,11 +152,20 @@ export class ImportService {
       }
     }
 
-    const articles = this.preparerArticles(parCle.get('PRODUITS'), anomalies, rapport);
-    const codesBarres = this.preparerCodesBarres(
-      parCle.get('GENERIQUES'), articles, anomalies, rapport,
+    // Un code-barres n'appartient qu'a un article, sur tout le catalogue.
+    // Le registre suit donc les codes de bout en bout : references servant
+    // de code-barres, codes generiques, puis codes de pack.
+    const codesUtilises = new Map<string, string>();
+
+    const articles = this.preparerArticles(
+      parCle.get('PRODUITS'), anomalies, rapport, codesUtilises,
     );
-    const packs = this.preparerPacks(parCle.get('PACKS'), articles, anomalies, rapport);
+    const codesBarres = this.preparerCodesBarres(
+      parCle.get('GENERIQUES'), articles, anomalies, rapport, codesUtilises,
+    );
+    const packs = this.preparerPacks(
+      parCle.get('PACKS'), articles, anomalies, rapport, codesUtilises,
+    );
     const vracs = this.preparerVracs(parCle.get('VRACS'), articles, anomalies, rapport);
     const clients = this.preparerTiers(
       parCle.get('CLIENTS'), TypeTiers.CLIENT, anomalies, rapport,
@@ -156,9 +174,20 @@ export class ImportService {
       parCle.get('FOURNISSEURS'), TypeTiers.FOURNISSEUR, anomalies, rapport,
     );
 
-    const valeurStock = articles.reduce(
-      (t, a) => t + Math.round(((a.stockDepotMilli + a.stockVenteMilli) * a.cumpCentimes) / 1000),
-      0,
+    this.resoudreCollisionsDeCode(
+      clients, fournisseurs, anomalies, parCle.get('FOURNISSEURS')?.nom ?? 'FOURNISSEURS',
+    );
+
+    // Valeur du stock : la somme est faite exactement, en entiers, et
+    // arrondie une seule fois a la fin. Arrondir article par article
+    // donnerait un total different de celui relu en base, et le controle
+    // de bascule perdrait son sens : il doit tomber au centime pres.
+    const valeurStock = this.arrondirMillieme(
+      articles.reduce(
+        (t, a) =>
+          t + BigInt(a.stockDepotMilli + a.stockVenteMilli) * BigInt(a.cumpCentimes),
+        BigInt(0),
+      ),
     );
 
     return {
@@ -171,7 +200,12 @@ export class ImportService {
           valeurStockCumpCentimes: valeurStock,
           totalSoldesClientsCentimes: clients.reduce((t, x) => t + x.soldeCentimes, 0),
           totalSoldesFournisseursCentimes: fournisseurs.reduce((t, x) => t + x.soldeCentimes, 0),
-          nombreCodesBarres: codesBarres.length + articles.filter((a) => a.codeBarrePrincipal).length,
+          nombreCodesBarres:
+            codesBarres.length +
+            articles.filter((a) => a.codeBarrePrincipal).length +
+            packs.filter((p) => p.codeBarre).length,
+          nombreClients: clients.length,
+          nombreFournisseurs: fournisseurs.length,
           nombrePacks: packs.length,
           nombreVracs: vracs.length,
           articlesStockNul: articles.filter(
@@ -189,11 +223,12 @@ export class ImportService {
     onglet: OngletLu | undefined,
     anomalies: Anomalie[],
     rapport: Record<string, RapportOnglet>,
+    codesUtilises: Map<string, string>,
   ): ArticlePrepare[] {
     if (!onglet) return [];
     const resultats: ArticlePrepare[] = [];
     const referencesVues = new Map<string, number>();
-    const codesVus = new Map<string, number>();
+    const codesVus = codesUtilises;
 
     for (const ligne of onglet.lignes) {
       const reference = champ(ligne, 'REFERENCE', 'REF', 'CODE PRODUIT', 'CODE');
@@ -222,7 +257,7 @@ export class ImportService {
 
       // Unites : U -> UN, K -> KG, GR -> KG. Les valeurs aberrantes de
       // l'export (« . », « + », « 28272 ») sont listees pour correction.
-      const uniteBrute = champ(ligne, 'UNITE', 'UNITE DE MESURE', 'UM');
+      const uniteBrute = champ(ligne, 'UNITE DE MESURE', 'UNITE', 'UM');
       const { unite, facteur, suspecte } = normaliserUnite(uniteBrute);
       if (suspecte && uniteBrute) {
         anomalies.push(this.anomalie(onglet.nom, ligne, 'UNITE', uniteBrute, 'UNITE_ABERRANTE',
@@ -241,22 +276,38 @@ export class ImportService {
       }
 
       // Les seuils negatifs de l'export sont remis a 0 (section 7).
-      const seuilBrut = nombre(champ(ligne, 'SEUIL', 'SEUIL ALERTE', 'STOCK MINI')) ?? 0;
+      // L'export tient un seuil et une capacite par emplacement.
+      const seuilMcBrut = nombre(champ(ligne, 'STOCK ALERTE (MC)', 'SEUIL (MC)')) ?? 0;
+      const seuilSvBrut = nombre(
+        champ(ligne, 'STOCK ALERTE (SV)', 'SEUIL (SV)', 'SEUIL', 'SEUIL ALERTE', 'STOCK MINI'),
+      ) ?? 0;
+      const capaciteMc = nombre(champ(ligne, 'CAPACITE (MC)')) ?? 0;
+      const capaciteSv = nombre(champ(ligne, 'CAPACITE (SV)')) ?? 0;
+      const seuilBrut = seuilSvBrut;
       if (seuilBrut < 0) {
         anomalies.push(this.anomalie(onglet.nom, ligne, 'SEUIL', String(seuilBrut),
           'SEUIL_NEGATIF', 'Seuil d’alerte negatif remis a 0', GraviteAnomalie.INFO));
       }
 
-      const codeBarre = champ(ligne, 'CODE BARRE', 'CODE A BARRE', 'EAN', 'GENCOD');
+      // L'export de ce logiciel n'a pas de colonne de code-barres : la
+      // reference EST le code-barres quand elle en a la forme. Les autres
+      // codes arrivent par l'onglet GENERIQUES.
+      const codeBarreBrut =
+        champ(ligne, 'CODE BARRE', 'CODE A BARRE', 'EAN', 'GENCOD') ||
+        (/^\d{8,14}$/.test(reference) ? reference : '');
+      let codeBarre = codeBarreBrut;
       if (codeBarre) {
         const deja = codesVus.get(codeBarre);
         if (deja !== undefined) {
           anomalies.push(this.anomalie(onglet.nom, ligne, 'CODE BARRE', codeBarre,
             'CODE_BARRE_DOUBLON',
-            `Code-barres deja porte par la ligne ${deja} : il ne sera pas repris ici`));
+            `Code-barres deja porte par l\u2019article ${deja} : il ne sera pas repris ici`));
           rapport[onglet.nom].erreurs++;
+          // La fiche est conservee, mais sans ce code : la vente au scan
+          // resterait ambigue entre deux articles.
+          codeBarre = '';
         } else {
-          codesVus.set(codeBarre, ligne.numero);
+          codesVus.set(codeBarre, reference);
           if (/^\d{13}$/.test(codeBarre) && !ean13Valide(codeBarre)) {
             anomalies.push(this.anomalie(onglet.nom, ligne, 'CODE BARRE', codeBarre,
               'EAN_CLE_INVALIDE', 'Cle de controle EAN-13 incorrecte',
@@ -291,15 +342,28 @@ export class ImportService {
         stockDepotMilli: Math.round(stockMc * 1000),
         stockVenteMilli: Math.round(stockSv * 1000),
         seuilAlerteMilli: Math.max(0, Math.round(seuilBrut * 1000)),
+        seuilDepotMilli: Math.max(0, Math.round(seuilMcBrut * 1000)),
+        capaciteDepotMilli: Math.max(0, Math.round(capaciteMc * 1000)) || null,
+        capaciteVenteMilli: Math.max(0, Math.round(capaciteSv * 1000)) || null,
         rayon: champ(ligne, 'RAYON'),
-        famille: champ(ligne, 'FAMILLE'),
-        codeBarrePrincipal: codeBarre && !codesVus.has(`${codeBarre}#pris`) ? codeBarre : null,
+        famille: champ(ligne, 'FAMILLE PRODUIT', 'FAMILLE'),
+        familleLibelle: champ(ligne, 'LIBELLE FAMILLE'),
+        codeBarrePrincipal: codeBarre || null,
         ligne: ligne.numero,
       });
       rapport[onglet.nom].retenus++;
     }
 
     return resultats;
+  }
+
+  /** Divise par 1 000 avec arrondi commercial, sans passer par un flottant. */
+  private arrondirMillieme(valeur: bigint): number {
+    const mille = BigInt(1000);
+    const demi = BigInt(500);
+    const arrondi =
+      valeur >= BigInt(0) ? (valeur + demi) / mille : -((-valeur + demi) / mille);
+    return Number(arrondi);
   }
 
   private prixOuNull(valeur: string): number | null {
@@ -312,10 +376,10 @@ export class ImportService {
     articles: ArticlePrepare[],
     anomalies: Anomalie[],
     rapport: Record<string, RapportOnglet>,
+    codesUtilises: Map<string, string>,
   ): Array<{ code: string; reference: string }> {
     if (!onglet) return [];
     const references = new Set(articles.map((a) => a.reference));
-    const vus = new Set(articles.map((a) => a.codeBarrePrincipal).filter(Boolean) as string[]);
     const resultats: Array<{ code: string; reference: string }> = [];
 
     for (const ligne of onglet.lignes) {
@@ -334,14 +398,16 @@ export class ImportService {
           'PRODUIT_INCONNU', `Le produit ${reference} n’existe pas dans l’onglet PRODUITS`));
         continue;
       }
-      if (vus.has(code)) {
+      const porteur = codesUtilises.get(code);
+      if (porteur !== undefined) {
         rapport[onglet.nom].erreurs++;
         anomalies.push(this.anomalie(onglet.nom, ligne, 'CODE GENERIQUE', code,
           'CODE_BARRE_DOUBLON',
-          'Ce code est deja attribue : un code ne peut appartenir qu’a un article'));
+          `Ce code est deja attribue a l’article ${porteur} : ` +
+            'un code ne peut appartenir qu’a un seul article'));
         continue;
       }
-      vus.add(code);
+      codesUtilises.set(code, reference);
       resultats.push({ code, reference });
       rapport[onglet.nom].retenus++;
     }
@@ -353,16 +419,34 @@ export class ImportService {
     articles: ArticlePrepare[],
     anomalies: Anomalie[],
     rapport: Record<string, RapportOnglet>,
-  ): Array<{ code: string; reference: string; nbUnites: number; prixCentimes: number }> {
+    codesUtilises: Map<string, string>,
+  ): Array<{
+    code: string; reference: string; nbUnites: number; prixCentimes: number;
+    codeBarre: string | null;
+  }> {
     if (!onglet) return [];
     const references = new Set(articles.map((a) => a.reference));
-    const resultats: Array<{ code: string; reference: string; nbUnites: number; prixCentimes: number }> = [];
+    const parReference = new Map(articles.map((a) => [a.reference, a]));
+    const packsVus = new Map<string, number>();
+    const resultats: Array<{
+      code: string; reference: string; nbUnites: number; prixCentimes: number;
+      codeBarre: string | null;
+    }> = [];
 
     for (const ligne of onglet.lignes) {
       const code = champ(ligne, 'CODE PACK', 'CODE');
       const reference = champ(ligne, 'CODE PRODUIT', 'PRODUIT', 'REFERENCE');
       const nb = nombre(champ(ligne, 'NBRE UNITES', 'NB UNITES', 'NOMBRE UNITES', 'QTE'));
-      const prix = nombre(champ(ligne, 'PRIX PACK', 'PRIX'));
+
+      // « PRIX APPLIQUE » ne porte pas un montant mais le nom de la
+      // categorie de prix a employer : PACK ou DETAIL. Le montant, lui,
+      // vit sur la fiche du produit de base.
+      const categorieAppliquee = champ(ligne, 'PRIX APPLIQUE', 'PRIX').toUpperCase();
+      const base = parReference.get(reference);
+      const prix =
+        categorieAppliquee === 'DETAIL'
+          ? (base?.prixDetailCentimes ?? 0) / 100
+          : (base?.prixPackCentimes ?? 0) / 100;
 
       if (!code || !reference || !nb || nb <= 0) {
         rapport[onglet.nom].erreurs++;
@@ -377,14 +461,39 @@ export class ImportService {
         continue;
       }
       if (!prix || prix <= 0) {
-        anomalies.push(this.anomalie(onglet.nom, ligne, 'PRIX PACK', String(prix ?? ''),
+        anomalies.push(this.anomalie(onglet.nom, ligne, 'PRIX APPLIQUE', categorieAppliquee,
           'PRIX_PACK_ABSENT',
-          'Pack sans prix : il serait vendu a zero, prix a saisir avant la bascule',
+          `Pack sans prix : la fiche du produit ${reference} n\u2019a pas de prix ` +
+            `« ${categorieAppliquee || 'PACK'} ». Il serait vendu a zero.`,
           GraviteAnomalie.AVERTISSEMENT));
       }
+      const dejaPack = packsVus.get(code);
+      if (dejaPack !== undefined) {
+        rapport[onglet.nom].erreurs++;
+        anomalies.push(this.anomalie(onglet.nom, ligne, 'CODE PACK', code,
+          'PACK_DOUBLON', `Code pack deja vu ligne ${dejaPack}`));
+        continue;
+      }
+      packsVus.set(code, ligne.numero);
+
+      // Le code d'un pack est aussi un code-barres : il ne peut pas etre
+      // deja porte par un article. Le pack est conserve sans code plutot
+      // que perdu, et le conflit est signale.
+      const porteur = codesUtilises.get(code);
+      if (porteur !== undefined) {
+        anomalies.push(this.anomalie(onglet.nom, ligne, 'CODE PACK', code,
+          'CODE_BARRE_DOUBLON',
+          `Le code du pack est deja le code-barres de l\u2019article ${porteur} : ` +
+            'le pack sera cree sans code-barres et devra en recevoir un',
+          GraviteAnomalie.AVERTISSEMENT));
+      } else {
+        codesUtilises.set(code, `PACK-${code}`);
+      }
+
       resultats.push({
         code, reference, nbUnites: Math.round(nb),
         prixCentimes: Math.round((prix ?? 0) * 100),
+        codeBarre: porteur === undefined ? code : null,
       });
       rapport[onglet.nom].retenus++;
     }
@@ -399,6 +508,7 @@ export class ImportService {
   ): Array<{ code: string; reference: string; nom: string }> {
     if (!onglet) return [];
     const references = new Set(articles.map((a) => a.reference));
+    const vracsVus = new Map<string, number>();
     const resultats: Array<{ code: string; reference: string; nom: string }> = [];
 
     for (const ligne of onglet.lignes) {
@@ -418,10 +528,65 @@ export class ImportService {
           'PRODUIT_INCONNU', `Produit ${reference} inconnu`));
         continue;
       }
+      const dejaVrac = vracsVus.get(code);
+      if (dejaVrac !== undefined) {
+        rapport[onglet.nom].erreurs++;
+        anomalies.push(this.anomalie(onglet.nom, ligne, 'CODE VRAC', code,
+          'VRAC_DOUBLON', `Code vrac deja vu ligne ${dejaVrac}`));
+        continue;
+      }
+      vracsVus.set(code, ligne.numero);
       resultats.push({ code, reference, nom: nom || code });
       rapport[onglet.nom].retenus++;
     }
     return resultats;
+  }
+
+  /**
+   * Resout les collisions de code entre clients et fournisseurs.
+   *
+   * L'ancien logiciel tient deux espaces de codes separes : le code « 15 »
+   * peut designer un client et un fournisseur sans rapport. GestGlobale
+   * reunit les deux dans une seule table, pour qu'une recherche suffise et
+   * qu'un tiers a la fois client et fournisseur n'existe qu'une fois.
+   *
+   * Le code du client est conserve tel quel, parce qu'il est le plus
+   * repandu et le plus reference ; le fournisseur en conflit recoit le
+   * prefixe « F- », et le gerant en est averti ligne par ligne.
+   */
+  private resoudreCollisionsDeCode(
+    clients: ReturnType<ImportService['preparerTiers']>,
+    fournisseurs: ReturnType<ImportService['preparerTiers']>,
+    anomalies: Anomalie[],
+    ongletFournisseurs: string,
+  ): void {
+    const codesClients = new Map(clients.map((c) => [c.code, c.raisonSociale]));
+    const codesFournisseurs = new Set(fournisseurs.map((f) => f.code));
+
+    for (const fournisseur of fournisseurs) {
+      const nomClient = codesClients.get(fournisseur.code);
+      if (nomClient === undefined) continue;
+
+      let nouveau = `F-${fournisseur.code}`;
+      let suffixe = 2;
+      while (codesClients.has(nouveau) || codesFournisseurs.has(nouveau)) {
+        nouveau = `F-${fournisseur.code}-${suffixe++}`;
+      }
+      codesFournisseurs.add(nouveau);
+
+      anomalies.push({
+        onglet: ongletFournisseurs,
+        ligne: fournisseur.ligne,
+        champ: 'CODE FOURNISSEUR',
+        valeur: fournisseur.code,
+        gravite: GraviteAnomalie.AVERTISSEMENT,
+        code: 'CODE_PARTAGE_CLIENT',
+        message:
+          `Le code « ${fournisseur.code} » designe aussi le client « ${nomClient} ». ` +
+          `Le fournisseur « ${fournisseur.raisonSociale} » prend le code « ${nouveau} ».`,
+      });
+      fournisseur.code = nouveau;
+    }
   }
 
   private preparerTiers(
@@ -431,14 +596,16 @@ export class ImportService {
     rapport: Record<string, RapportOnglet>,
   ): Array<{
     code: string; raisonSociale: string; soldeCentimes: number; typeClient: TypeClient | null;
-    bloque: boolean; telephone: string; carteFidelite: string | null; ligne: number;
+    bloque: boolean; telephone: string; carteFidelite: string | null;
+    remisePourcent: number; categoriePrixBrute: string; ligne: number;
   }> {
     if (!onglet) return [];
     const codesVus = new Map<string, number>();
     const cartesVues = new Map<string, number>();
     const resultats: Array<{
       code: string; raisonSociale: string; soldeCentimes: number; typeClient: TypeClient | null;
-      bloque: boolean; telephone: string; carteFidelite: string | null; ligne: number;
+      bloque: boolean; telephone: string; carteFidelite: string | null;
+      remisePourcent: number; categoriePrixBrute: string; ligne: number;
     }> = [];
 
     for (const ligne of onglet.lignes) {
@@ -460,15 +627,29 @@ export class ImportService {
       }
       codesVus.set(code, ligne.numero);
 
-      // TYPE CLIENT F/C/S : fidelite, client, interne (section 7).
+      // TYPE CLIENT : l'export compte 6 995 « F », 21 « C » et 5 « S ».
+      // « F » ne peut donc pas designer la fidelite, qui ne concerne que
+      // 3 460 fiches : c'est le client de passage. « C » correspond aux
+      // comptes professionnels, « S » aux magasins et depots internes.
+      //
+      // Les cartes fidelite anonymes se reconnaissent a leur raison
+      // sociale, « CARTE FIDELITE », et non a ce code.
+      //
+      // Interpretation a confirmer avec le client : elle gouverne la
+      // categorie de prix appliquee en caisse.
       const typeBrut = champ(ligne, 'TYPE CLIENT', 'TYPE').toUpperCase().slice(0, 1);
+      const anonymeFidelite = /carte\s*fidelit/i.test(
+        raisonSociale.normalize('NFD').replace(/[\u0300-\u036f]/g, ''),
+      );
       const typeClient =
         type === TypeTiers.CLIENT
-          ? typeBrut === 'F'
+          ? anonymeFidelite
             ? TypeClient.CARTE_FIDELITE
-            : typeBrut === 'S'
-              ? TypeClient.INTERNE
-              : TypeClient.PARTICULIER
+            : typeBrut === 'C'
+              ? TypeClient.PROFESSIONNEL
+              : typeBrut === 'S'
+                ? TypeClient.INTERNE
+                : TypeClient.PARTICULIER
           : null;
 
       const carte = champ(ligne, 'CARTE FIDELITE', 'CARTE', 'NUM CARTE') || null;
@@ -486,6 +667,8 @@ export class ImportService {
 
       const solde = Math.round((nombre(champ(ligne, 'SOLDE', 'SOLDE CLIENT', 'SOLDE FOURNISSEUR')) ?? 0) * 100);
       const bloqueBrut = champ(ligne, 'CLIENT BLOQUE', 'BLOQUE').toUpperCase();
+      const remise = Math.round(nombre(champ(ligne, 'TAUX REMISE', 'REMISE')) ?? 0);
+      const categoriePrixBrute = champ(ligne, 'CATEGORIE DE PRIX', 'CATEGORIE PRIX');
 
       resultats.push({
         code,
@@ -493,8 +676,10 @@ export class ImportService {
         soldeCentimes: solde,
         typeClient,
         bloque: ['O', 'OUI', '1', 'X', 'TRUE', 'VRAI'].includes(bloqueBrut),
-        telephone: champ(ligne, 'TELEPHONE', 'TEL', 'MOBILE'),
+        telephone: champ(ligne, 'TELEPHONE 01', 'TELEPHONE 1', 'TELEPHONE', 'TEL', 'MOBILE'),
         carteFidelite: carte && cartesVues.get(carte) === ligne.numero ? carte : null,
+        remisePourcent: Math.max(0, Math.min(100, remise)),
+        categoriePrixBrute,
         ligne: ligne.numero,
       });
       rapport[onglet.nom].retenus++;
@@ -713,6 +898,7 @@ export class ImportService {
           const baseId = parReference.get(pack.reference);
           if (!baseId) continue;
           const base = donnees.articles.find((a) => a.reference === pack.reference);
+          if (parReference.has(`PACK-${pack.code}`)) continue;
           await tx.article.create({
             data: {
               reference: `PACK-${pack.code}`,
@@ -727,7 +913,13 @@ export class ImportService {
               prix: {
                 create: [{ categorie: CategoriePrix.PACK, prixCentimes: b(pack.prixCentimes) }],
               },
-              codesBarres: { create: [{ code: pack.code, type: 'INTERNE', principal: true }] },
+              ...(pack.codeBarre
+                ? {
+                    codesBarres: {
+                      create: [{ code: pack.codeBarre, type: 'INTERNE' as const, principal: true }],
+                    },
+                  }
+                : {}),
             },
           });
           packs++;
@@ -828,8 +1020,11 @@ export class ImportService {
   async controlesDeBascule() {
     const [articles, stocks, clients, fournisseurs, codes, packs, vracs] = await Promise.all([
       this.prisma.article.count(),
+      // La division est faite une seule fois, sur la somme exacte : une
+      // division par ligne tronquerait et ferait perdre quelques centimes
+      // sur des dizaines de milliers de lignes.
       this.prisma.$queryRaw<Array<{ valeur: string | null }>>`
-        SELECT SUM(s."quantiteMilli"::bigint * a."cumpCentimes" / 1000)::text AS valeur
+        SELECT ROUND(SUM(s."quantiteMilli"::numeric * a."cumpCentimes") / 1000)::text AS valeur
           FROM "Stock" s JOIN "Article" a ON a."id" = s."articleId"`,
       this.prisma.tiers.aggregate({
         where: { type: 'CLIENT' },

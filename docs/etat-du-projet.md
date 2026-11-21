@@ -108,8 +108,8 @@ empreintes avec verification d'integrite.
 
 | Critere | Etat |
 |---|---|
-| Import complet : 28 272 produits, 21 198 codes-barres, 1 735 packs, 450 vracs, 7 021 clients, 692 fournisseurs, sans perte | **assistant pret**, a eprouver sur le fichier reel |
-| Valeur du stock au CUMP et soldes tiers identiques a l'ancien logiciel | **controles exposes**, a comparer lors de l'import a blanc |
+| Import complet : 28 272 produits, 21 198 codes-barres, 1 735 packs, 450 vracs, 7 021 clients, 692 fournisseurs, sans perte | **eprouve sur le fichier reel** — tout est repris sauf 115 lignes porteuses d'erreurs a corriger par le client |
+| Valeur du stock au CUMP et soldes tiers identiques a l'ancien logiciel | **controles identiques au centime pres** entre le fichier et la base ; reste a les comparer avec l'ancien logiciel |
 | Une journee type (environ 430 tickets sur 2 caisses) rejouee sans erreur | **verifie** — 430 tickets et 2 780 lignes rejoues sur 30 015 articles |
 | Coupure reseau de 2 heures : 100 % des tickets retrouves, sans doublon | **verifie** |
 | Cloture Z avec comptage, ecart calcule et justifie | **verifie** |
@@ -158,8 +158,9 @@ continuer, mais chacun changera du code s'il est tranche plus tard.
 
 ## 5. Prochaines etapes proposees
 
-1. Eprouver l'assistant d'import sur le vrai fichier `VENTES_2026.xls` et
-   comparer les controles de bascule avec l'ancien logiciel.
+1. Faire corriger par le client les 115 lignes bloquantes du rapport
+   d'import, puis comparer les trois totaux avec l'ancien logiciel.
+   Voir [`rapport-import-VENTES_2026.md`](rapport-import-VENTES_2026.md).
 2. Empaqueter la caisse pour Windows et l'installer sur un poste reel avec
    sa douchette, son imprimante et son tiroir.
 3. Produire les documents de vente a valeur legale (factures, bons de
