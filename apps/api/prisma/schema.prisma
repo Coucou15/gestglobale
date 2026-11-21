@@ -1572,8 +1572,9 @@ model SessionImport {
   utilisateurId String
   creeLe        DateTime     @default(now())
 
-  utilisateur Utilisateur      @relation(fields: [utilisateurId], references: [id])
+  utilisateur Utilisateur       @relation(fields: [utilisateurId], references: [id])
   anomalies   AnomalieImport[]
+  historique  LigneHistorique[]
 }
 
 enum GraviteAnomalie {
@@ -1624,4 +1625,68 @@ model Compteur {
   cle       String   @id
   valeur    Int      @default(0)
   modifieLe DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------
+// 12. Historique repris de l'ancien logiciel (section 7)
+// ---------------------------------------------------------------------
+
+enum OrigineHistorique {
+  VENTE             // onglet SORTIES
+  RECEPTION         // onglet ENTREES
+  MOUVEMENT_STOCK   // onglet STOCKS
+  TRESORERIE        // onglet TRESORERIE
+  CLOTURE_CAISSE    // onglet RASEES
+}
+
+/// Ligne d'historique reprise de l'ancien logiciel, en lecture seule.
+///
+/// Volontairement separee des journaux vivants. Le stock repris par
+/// l'import est celui constate a la fin de la journee exportee, et
+/// l'onglet STOCKS contient les mouvements de cette meme journee :
+/// les rejouer dans le journal de stock compterait deux fois la
+/// marchandise. Il en va de meme pour la tresorerie, dont l'export ne
+/// donne aucun solde d'ouverture.
+///
+/// Les colonnes typees servent la consultation et les filtres ; la
+/// colonne `donnees` conserve la ligne d'origine en entier, pour qu'aucune
+/// information ne soit perdue meme si elle n'est pas exploitee aujourd'hui.
+model LigneHistorique {
+  id              String            @id @default(uuid())
+  origine         OrigineHistorique
+  sessionImportId String?
+  ongletSource    String
+  ligneSource     Int?
+
+  date            DateTime?
+  heure           String?
+  type            String?
+  numeroDocument  String?
+  /// Reference du produit, du tiers ou du compte selon l'origine.
+  reference       String?
+  libelle         String?
+  tiersCode       String?
+  tiersNom        String?
+  utilisateur     String?
+  caisse          String?
+  magasin         String?
+  modeReglement   String?
+
+  quantiteMilli        Int?
+  montantHtCentimes    BigInt?
+  montantTvaCentimes   BigInt?
+  montantTimbreCentimes BigInt?
+  montantTtcCentimes   BigInt?
+  margeCentimes        BigInt?
+
+  /// La ligne d'origine, intacte.
+  donnees         Json
+  creeLe          DateTime          @default(now())
+
+  sessionImport SessionImport? @relation(fields: [sessionImportId], references: [id])
+
+  @@index([origine, date])
+  @@index([numeroDocument])
+  @@index([reference])
+  @@index([tiersCode])
 }

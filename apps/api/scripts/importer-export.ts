@@ -66,6 +66,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  console.log(`Historique repris : ${(resultat.lignesHistorique ?? 0).toLocaleString('fr-FR')} ligne(s)`);
   console.log(`Import termine en ${resultat.dureeSecondes} s ` +
     `(${((Date.now() - debut) / 1000).toFixed(0)} s avec l'analyse)\n`);
   console.log('Ecrit en base');

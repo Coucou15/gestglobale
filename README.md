@@ -14,7 +14,7 @@ a M8, l'assistant de migration et la caisse hors ligne.
 |---|---|
 | Serveur central (API + PostgreSQL) | 13 modules, 54 tables, operationnel |
 | Caisse hors ligne (Electron + SQLite) | vend, encaisse, cloture et resynchronise sans reseau |
-| Back-office web (React) | tableau de bord, articles, stocks, receptions, inventaires, caisses, tiers, tresorerie, audit |
+| Back-office web (React) | tableau de bord, articles, stocks, receptions, inventaires, caisses, tiers, tresorerie, historique repris, audit |
 | Assistant d'import | lit l'export Excel de l'ancien logiciel, le controle et le charge |
 
 **114 verifications automatisees** passent contre une vraie base et une

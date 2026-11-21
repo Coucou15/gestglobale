@@ -137,21 +137,40 @@ Cette lecture gouverne la categorie de prix appliquee en caisse :
 **confirmez-la**, c'est la seule interpretation que je n'ai pas pu deduire
 du fichier avec certitude.
 
-## 6. Ce qui n'est pas encore repris
+## 6. L'historique repris
 
-Les six onglets d'historique sont lus et comptes, mais pas encore
-importes :
+Les cinq onglets d'historique sont desormais importes et consultables
+dans **Historique repris** du back-office : **2 642 lignes**.
 
-| Onglet | Lignes | Destination prevue |
-|---|---:|---|
-| SORTIES | 432 | historique des ventes, en lecture seule |
-| STOCKS | 1 752 | historique des mouvements |
-| TRESORERIE | 450 | mouvements de tresorerie |
-| DETAIL DES VENTES | 1 722 | recalcule depuis l'historique |
-| ENTREES | 6 | historique des receptions |
-| RASEES | 2 | clotures de caisse |
+| Onglet | Lignes reprises |
+|---|---:|
+| STOCKS | 1 752 |
+| TRESORERIE | 450 |
+| SORTIES | 432 |
+| ENTREES | 6 |
+| RASEES | 2 |
 
-L'onglet **RASEES** confirme le defaut qui a motive le projet :
+Chaque ligne conserve **toutes ses colonnes d'origine**, y compris celles
+que GestGlobale n'exploite pas aujourd'hui : rien n'est perdu, et votre
+comptable retrouve le detail exact d'un document ancien.
+
+L'onglet DETAIL DES VENTES (1 722 lignes) n'est volontairement pas
+importe : c'est une synthese que GestGlobale recalcule depuis les ventes.
+
+### Pourquoi cet historique n'entre pas dans les stocks
+
+Le stock repris des PRODUITS est celui constate **a la fin** de la
+journee exportee, et l'onglet STOCKS contient les mouvements **de cette
+meme journee**. Les rejouer dans le journal de stock compterait deux fois
+la marchandise. De meme, l'export ne donne aucun solde d'ouverture de
+tresorerie : rejouer ses 450 ecritures donnerait des soldes faux.
+
+L'historique est donc consultable et cherchable, mais separe des journaux
+vivants — ce que demande le cahier des charges : « historique consultable
+(lecture seule) ».
+
+L'onglet **RASEES**, repris lui aussi, confirme le defaut qui a motive le
+projet :
 
 | Date | Caisse | Recette comptable | Recette physique | Difference |
 |---|---:|---:|---:|---:|

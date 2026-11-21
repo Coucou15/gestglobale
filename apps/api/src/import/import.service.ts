@@ -1,10 +1,14 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { GraviteAnomalie, Prisma, StatutImport, TypeImport, TypeTiers, TypeClient, CategoriePrix, UniteMesure } from '@prisma/client';
+import {
+  GraviteAnomalie, OrigineHistorique, Prisma, StatutImport, TypeImport,
+  TypeTiers, TypeClient, CategoriePrix, UniteMesure,
+} from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { b } from '../commun/bigint';
 import { normaliserUnite, ean13Valide } from '@gestglobale/shared';
 import { lireTampon, champ, nombre, type OngletLu, type LigneBrute } from './lecture';
+import { preparerHistorique, cleHistorique, type LignePreparee } from './historique';
 
 export interface Anomalie {
   onglet: string;
@@ -34,6 +38,7 @@ export interface ResultatAnalyse {
     nombreCodesBarres: number;
     nombreClients: number;
     nombreFournisseurs: number;
+    nombreLignesHistorique: number;
     nombrePacks: number;
     nombreVracs: number;
     articlesStockNul: number;
@@ -123,6 +128,7 @@ export class ImportService {
       vracs: Array<{ code: string; reference: string; nom: string }>;
       clients: ReturnType<ImportService['preparerTiers']>;
       fournisseurs: ReturnType<ImportService['preparerTiers']>;
+      historique: LignePreparee[];
     };
   }> {
     const onglets = await lireTampon(tampon);
@@ -182,6 +188,15 @@ export class ImportService {
     // arrondie une seule fois a la fin. Arrondir article par article
     // donnerait un total different de celui relu en base, et le controle
     // de bascule perdrait son sens : il doit tomber au centime pres.
+    // Historique : consultable, jamais rejoue dans les journaux vivants.
+    const historique: LignePreparee[] = [];
+    for (const onglet of onglets) {
+      if (!cleHistorique(onglet.nom)) continue;
+      const lignes = preparerHistorique(onglet);
+      historique.push(...lignes);
+      rapport[onglet.nom].retenus = lignes.length;
+    }
+
     const valeurStock = this.arrondirMillieme(
       articles.reduce(
         (t, a) =>
@@ -191,7 +206,7 @@ export class ImportService {
     );
 
     return {
-      donnees: { articles, codesBarres, packs, vracs, clients, fournisseurs },
+      donnees: { articles, codesBarres, packs, vracs, clients, fournisseurs, historique },
       resultat: {
         onglets: rapport,
         anomalies,
@@ -206,6 +221,7 @@ export class ImportService {
             packs.filter((p) => p.codeBarre).length,
           nombreClients: clients.length,
           nombreFournisseurs: fournisseurs.length,
+          nombreLignesHistorique: historique.length,
           nombrePacks: packs.length,
           nombreVracs: vracs.length,
           articlesStockNul: articles.filter(
@@ -1001,14 +1017,105 @@ export class ImportService {
       utilisateurId: params.utilisateurId,
     });
 
+    // L'historique s'ecrit apres la transaction du referentiel : il ne
+    // conditionne rien, et son echec ne doit pas faire perdre la bascule.
+    let lignesHistorique = 0;
+    try {
+      lignesHistorique = await this.ecrireHistorique(donnees.historique, session.id);
+    } catch (erreur) {
+      this.logger.error(
+        `Reprise de l'historique incomplete : ${erreur instanceof Error ? erreur.message : erreur}`,
+      );
+    }
+
     return {
       importe: true,
+      lignesHistorique,
       sessionId: session.id,
       dureeSecondes: Math.round((Date.now() - debut) / 1000),
       compteurs,
       // Controles de bascule : a comparer avec l'ancien logiciel.
       controles: resultat.controles,
       resultat,
+    };
+  }
+
+  /**
+   * Ecrit l'historique repris, par lots.
+   *
+   * Hors de la transaction du referentiel : ces lignes ne conditionnent
+   * aucune regle de gestion, et leur echec ne doit pas faire perdre une
+   * bascule reussie par ailleurs.
+   */
+  private async ecrireHistorique(
+    lignes: LignePreparee[],
+    sessionImportId: string,
+  ): Promise<number> {
+    const TAILLE = 500;
+    let ecrites = 0;
+    for (let i = 0; i < lignes.length; i += TAILLE) {
+      const lot = lignes.slice(i, i + TAILLE);
+      const resultat = await this.prisma.ligneHistorique.createMany({
+        data: lot.map((l) => ({ ...l, sessionImportId })),
+      });
+      ecrites += resultat.count;
+    }
+    return ecrites;
+  }
+
+  /** Historique repris, filtrable pour consultation (section 7). */
+  async historique(params: {
+    origine?: OrigineHistorique;
+    texte?: string;
+    depuis?: Date;
+    jusqua?: Date;
+    page?: number;
+    taille?: number;
+  }) {
+    const taille = Math.min(params.taille ?? 50, 200);
+    const saut = (Math.max(params.page ?? 1, 1) - 1) * taille;
+    const texte = params.texte?.trim();
+
+    const where = {
+      ...(params.origine ? { origine: params.origine } : {}),
+      ...(params.depuis || params.jusqua
+        ? {
+            date: {
+              ...(params.depuis ? { gte: params.depuis } : {}),
+              ...(params.jusqua ? { lte: params.jusqua } : {}),
+            },
+          }
+        : {}),
+      ...(texte
+        ? {
+            OR: [
+              { numeroDocument: { contains: texte, mode: 'insensitive' as const } },
+              { reference: { contains: texte, mode: 'insensitive' as const } },
+              { libelle: { contains: texte, mode: 'insensitive' as const } },
+              { tiersNom: { contains: texte, mode: 'insensitive' as const } },
+              { tiersCode: texte },
+            ],
+          }
+        : {}),
+    };
+
+    const [lignes, total, parOrigine] = await Promise.all([
+      this.prisma.ligneHistorique.findMany({
+        where,
+        orderBy: [{ date: 'desc' }, { ligneSource: 'asc' }],
+        take: taille,
+        skip: saut,
+      }),
+      this.prisma.ligneHistorique.count({ where }),
+      this.prisma.ligneHistorique.groupBy({ by: ['origine'], _count: true }),
+    ]);
+
+    return {
+      total,
+      page: params.page ?? 1,
+      taille,
+      parOrigine: parOrigine.map((o) => ({ origine: o.origine, nombre: o._count })),
+      lignes,
     };
   }
 

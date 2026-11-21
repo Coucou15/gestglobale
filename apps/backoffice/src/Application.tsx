@@ -11,6 +11,7 @@ import { Caisses } from './pages/Caisses';
 import { Tiers } from './pages/Tiers';
 import { Tresorerie } from './pages/Tresorerie';
 import { Audit } from './pages/Audit';
+import { Historique } from './pages/Historique';
 
 export interface Utilisateur {
   id: string;
@@ -30,6 +31,7 @@ const ENTREES = [
   { chemin: '/caisses', libelle: 'Caisses', droit: 'rapport.son_magasin' },
   { chemin: '/tiers', libelle: 'Clients et fournisseurs', droit: 'tiers.voir' },
   { chemin: '/tresorerie', libelle: 'Tresorerie', droit: 'tresorerie.voir' },
+  { chemin: '/historique', libelle: 'Historique repris', droit: 'rapport.son_magasin' },
   { chemin: '/audit', libelle: 'Journal d’audit', droit: 'audit.consulter' },
 ];
 
@@ -127,6 +129,7 @@ export function Application() {
             ['/caisses', 'rapport.son_magasin', <Caisses />],
             ['/tiers', 'tiers.voir', <Tiers />],
             ['/tresorerie', 'tresorerie.voir', <Tresorerie utilisateur={utilisateur} />],
+            ['/historique', 'rapport.son_magasin', <Historique />],
             ['/audit', 'audit.consulter', <Audit />],
           ] as Array<[string, string, ReactElement]>).map(([chemin, droit, element]) => (
             <Route

@@ -4,7 +4,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags } from '@nestjs/swagger';
-import { GraviteAnomalie, TypeImport } from '@prisma/client';
+import { GraviteAnomalie, OrigineHistorique, TypeImport } from '@prisma/client';
 import { ImportService } from './import.service';
 import { FormatNonGere } from './lecture';
 import { Droits, Utilisateur, type UtilisateurConnecte } from '../auth/droits.decorator';
@@ -120,6 +120,31 @@ export class ImportController {
   @Droits(PERMISSIONS.IMPORT_EXECUTER)
   anomalies(@Param('id') id: string, @Query('gravite') gravite?: GraviteAnomalie) {
     return this.importation.anomalies(id, gravite);
+  }
+
+  /**
+   * Historique repris de l'ancien logiciel, en lecture seule (section 7).
+   * Accessible a qui peut consulter les rapports, pas seulement a
+   * l'operateur de la migration.
+   */
+  @Get('historique')
+  @Droits(PERMISSIONS.RAPPORT_SON_MAGASIN)
+  historique(
+    @Query('origine') origine?: OrigineHistorique,
+    @Query('texte') texte?: string,
+    @Query('depuis') depuis?: string,
+    @Query('jusqua') jusqua?: string,
+    @Query('page') page?: string,
+    @Query('taille') taille?: string,
+  ) {
+    return this.importation.historique({
+      origine,
+      texte,
+      depuis: depuis ? new Date(depuis) : undefined,
+      jusqua: jusqua ? new Date(jusqua) : undefined,
+      page: page ? Number(page) : 1,
+      taille: taille ? Number(taille) : 50,
+    });
   }
 
   /** Controles de bascule a comparer avec l'ancien logiciel. */
