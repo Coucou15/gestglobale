@@ -17,16 +17,27 @@ a M8, l'assistant de migration et la caisse hors ligne.
 | Back-office web (React) | tableau de bord, articles, promotions, stocks, factures et bons de livraison, receptions, inventaires, caisses, tiers, tresorerie, historique repris, audit |
 | Assistant d'import | lit l'export Excel de l'ancien logiciel, le controle et le charge |
 
-**438 verifications automatisees** passent contre une vraie base, une API
+**451 verifications automatisees** passent contre une vraie base, une API
 reellement demarree et, pour la caisse, un vrai Electron : `pnpm recette`.
 
-Le parcours de saisie est verifie dans un vrai navigateur, de la
-reception a l'inventaire jusqu'au cloisonnement des droits :
-`node apps/backoffice/test-navigateur.mjs`, API et back-office demarres.
-Les ecrans de documents, d'historique, de promotions et de fidelite ont
-chacun leur verification : `test-documents.mjs`, `test-historique.mjs`,
-`test-promotions.mjs`, `test-fidelite.mjs`, `test-rapports.mjs`,
-`test-transferts.mjs`, `test-comptabilite.mjs`, `test-personnel.mjs`.
+Chaque ecran a sa verification dans un vrai navigateur, API et
+back-office demarres. Elles n'attendent pas toutes la meme base :
+
+| Verification | Ce qu'elle suppose |
+|---|---|
+| `test-navigateur.mjs` | le jeu d'essai **et la recette jouee** — le tiroir doit contenir des especes |
+| `test-rapports.mjs` | le jeu d'essai **et la recette jouee** — il faut des ventes a rapporter |
+| `test-documents.mjs` | le jeu d'essai seul |
+| `test-promotions.mjs` | le jeu d'essai seul |
+| `test-fidelite.mjs` | le jeu d'essai seul |
+| `test-transferts.mjs` | le jeu d'essai seul |
+| `test-comptabilite.mjs` | le jeu d'essai seul |
+| `test-personnel.mjs` | le jeu d'essai seul |
+| `test-historique.mjs` | une base ou **l'export du client a ete importe** |
+
+Une base fraichement semee pour chacune : ces verifications creent des
+documents, sortent du stock et etablissent des bulletins, donc les
+enchainer sur la meme base les fait echouer pour de mauvaises raisons.
 
 Le resume quotidien du gerant demande un relais de messagerie, que le
 client doit fournir : voir [`docs/resume-quotidien.md`](docs/resume-quotidien.md).
@@ -281,7 +292,7 @@ le serveur et enchaine :
 |---|---|
 | Noyau metier (hors base, hors reseau) | 92 |
 | Nettoyage a l'import et documents de vente | 61 |
-| Recette fonctionnelle des lots 1, 2 et 3 | 224 |
+| Recette fonctionnelle des lots 1, 2 et 3 | 237 |
 | Coupure reseau de la caisse | 20 |
 | Cartes cadeaux pendant une coupure | 8 |
 | La caisse de bout en bout sous Electron | 33 |

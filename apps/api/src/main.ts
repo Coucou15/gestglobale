@@ -6,6 +6,7 @@ import helmet from 'helmet';
 import { json, urlencoded } from 'express';
 import { AppModule } from './app.module';
 import { installerSerialisationBigInt } from './commun/bigint';
+import { FiltrePrisma } from './commun/prisma-exception.filter';
 
 async function demarrer(): Promise<void> {
   installerSerialisationBigInt();
@@ -22,6 +23,11 @@ async function demarrer(): Promise<void> {
   app.use(urlencoded({ extended: true, limit: tailleMaxCorps }));
 
   app.use(helmet());
+
+  // Une entite absente doit rendre « introuvable », pas « erreur
+  // interne » : ce filtre traduit les erreurs de Prisma pour toutes les
+  // routes d'un coup.
+  app.useGlobalFilters(new FiltrePrisma());
   app.enableCors({ origin: true, credentials: true });
   app.setGlobalPrefix('api');
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });

@@ -195,6 +195,20 @@ comptable. Chaque employe accede en revanche a ses propres bulletins et
 a son solde de conges, depuis son telephone, et a rien d'autre : tirer
 le document d'un collegue est refuse.
 
+**M5 — Documents de vente, en PDF aussi.** Factures, bons de livraison,
+proformas et avoirs se telechargent en PDF depuis le back-office, et
+surtout se fabriquent **cote serveur**, sans navigateur : c'est ce qui
+permettra de les joindre a un courriel sans qu'une personne clique
+quelque part.
+
+L'impression HTML reste pour qui imprime depuis son ecran. Les deux
+rendus partent du meme document et portent les memes mentions — une
+facture dont le PDF differerait de l'impression serait pire qu'une
+absence de PDF, puisque le client et le comptable ne sauraient plus
+laquelle fait foi. Une facture de plusieurs pages rappelle son numero
+et son client sur chaque feuille, et un document annule porte son
+filigrane sur toutes.
+
 **M12 — Comptabilite et exports.** Trois journaux — ventes, achats,
 tresorerie — et un etat pour les declarations. Ils sortent des memes
 ecritures que les rapports du gerant, mais presentes comme un comptable
@@ -371,8 +385,9 @@ continuer, mais chacun changera du code s'il est tranche plus tard.
    [`installer-la-caisse.md`](installer-la-caisse.md).
 3. Obtenir le relais de messagerie, pour que le resume quotidien parte
    vraiment et que les factures puissent etre envoyees sans intervention
-   humaine. La fabrication du PDF cote serveur est desormais en place
-   pour les rapports ; l'etendre aux factures est court.
+   humaine. Les factures, bons de livraison, proformas et avoirs sont
+   desormais fabriques en PDF par le serveur : il ne manque que le
+   relais pour les joindre a un courriel.
 4. Refaire le test de charge sur le serveur du client : le ProLiant
    ML330 G6 n'a pas de SSD et les durees y seront moins bonnes que dans
    l'environnement de developpement.

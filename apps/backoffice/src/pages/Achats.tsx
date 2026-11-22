@@ -3,6 +3,7 @@ import { appeler, formaterDA, formaterDate, formaterQuantite } from '../client';
 import { ChercheurArticle, type ArticleTrouve } from '../composants/ChercheurArticle';
 import { useReferentiel } from '../composants/referentiel';
 import type { Utilisateur } from '../Application';
+import { ChoixMagasin } from '../composants/ChoixMagasin';
 
 interface Reception {
   id: string; numero: string; type: string; statut: string;
@@ -83,7 +84,13 @@ export function Achats({ utilisateur }: { utilisateur: Utilisateur }) {
   const [dateEcheance, setDateEcheance] = useState('');
   const [appliquerPrix, setAppliquerPrix] = useState(true);
 
-  const magasin = magasins[0];
+  // Le magasin est choisi, jamais devine : voir ChoixMagasin.
+  const [magasinId, setMagasinId] = useState('');
+  const magasin = magasins.find((m) => m.id === magasinId) ?? magasins[0];
+
+  useEffect(() => {
+    if (!magasinId && magasins.length > 0) setMagasinId(magasins[0].id);
+  }, [magasins, magasinId]);
   const peutRecevoir = utilisateur.permissions.includes('stock.reception');
 
   const charger = async () => {
@@ -104,7 +111,8 @@ export function Achats({ utilisateur }: { utilisateur: Utilisateur }) {
   }, []);
 
   useEffect(() => {
-    if (!emplacementId && magasin) {
+    const appartient = magasin?.emplacements.some((e) => e.id === emplacementId);
+    if (magasin && !appartient) {
       const parDefaut = magasin.emplacements.find((e) => e.parDefautReception)
         ?? magasin.emplacements[0];
       if (parDefaut) setEmplacementId(parDefaut.id);
@@ -209,13 +217,20 @@ export function Achats({ utilisateur }: { utilisateur: Utilisateur }) {
           <h2 style={{ marginTop: 0, fontSize: 18 }}>Nouvelle reception</h2>
 
           <div className="barre-outils">
-            <select value={fournisseurId} onChange={(e) => setFournisseurId(e.target.value)}>
+            <ChoixMagasin magasins={magasins} valeur={magasin?.id ?? ''}
+              surChoix={setMagasinId} />
+          </div>
+
+          <div className="barre-outils">
+            <select id="fournisseur" value={fournisseurId}
+              onChange={(e) => setFournisseurId(e.target.value)}>
               <option value="">— Choisir un fournisseur —</option>
               {fournisseurs.map((f) => (
                 <option key={f.id} value={f.id}>{f.code} — {f.raisonSociale}</option>
               ))}
             </select>
-            <select value={emplacementId} onChange={(e) => setEmplacementId(e.target.value)}>
+            <select id="emplacement" value={emplacementId}
+              onChange={(e) => setEmplacementId(e.target.value)}>
               {magasin.emplacements.map((e) => (
                 <option key={e.id} value={e.id}>{e.nom}</option>
               ))}

@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { appeler, formaterDA, formaterDate, ouvrirImpression } from '../client';
+import { appeler, formaterDA, formaterDate, ouvrirImpression, telecharger } from '../client';
 import { ChercheurArticle, type ArticleTrouve } from '../composants/ChercheurArticle';
 import { useReferentiel } from '../composants/referentiel';
 import type { Utilisateur } from '../Application';
+import { ChoixMagasin } from '../composants/ChoixMagasin';
 
 interface Document {
   id: string; numero: string; type: string; statut: string; brouillon: boolean;
@@ -65,7 +66,13 @@ export function Documents({ utilisateur }: { utilisateur: Utilisateur }) {
   const [mode, setMode] = useState<'CREDIT' | 'ESPECES' | 'CARTE' | 'CHEQUE'>('CREDIT');
   const [compteId, setCompteId] = useState('');
 
-  const magasin = magasins[0];
+  // Le magasin est choisi, jamais devine : voir ChoixMagasin.
+  const [magasinId, setMagasinId] = useState('');
+  const magasin = magasins.find((m) => m.id === magasinId) ?? magasins[0];
+
+  useEffect(() => {
+    if (!magasinId && magasins.length > 0) setMagasinId(magasins[0].id);
+  }, [magasins, magasinId]);
 
   const charger = async () => {
     setErreur(null);
@@ -195,6 +202,11 @@ export function Documents({ utilisateur }: { utilisateur: Utilisateur }) {
       {saisie && (
         <div className="carte" style={{ marginBottom: 24 }}>
           <h2 style={{ marginTop: 0, fontSize: 18 }}>Nouveau document</h2>
+
+          <div className="barre-outils">
+            <ChoixMagasin magasins={magasins} valeur={magasin?.id ?? ''}
+              surChoix={setMagasinId} />
+          </div>
 
           <div className="barre-outils">
             <select value={type} onChange={(e) => setType(e.target.value)}>
@@ -398,6 +410,19 @@ export function Documents({ utilisateur }: { utilisateur: Utilisateur }) {
                           .catch((e) => setErreur(e instanceof Error ? e.message : String(e)));
                       }}>
                         Imprimer
+                      </button>{' '}
+                      {/*
+                        Le PDF est fabrique par le serveur : c'est celui
+                        qu'on joint a un courriel, la ou l'impression du
+                        navigateur demande toujours un geste humain.
+                      */}
+                      <button disabled={occupe} onClick={() => {
+                        setErreur(null);
+                        void telecharger(`/ventes/documents/${d.numero}/document.pdf`)
+                          .then((nom) => setInfo(`${nom} telecharge.`))
+                          .catch((e) => setErreur(e instanceof Error ? e.message : String(e)));
+                      }}>
+                        PDF
                       </button>{' '}
                       {(transformations[d.type] ?? []).map((t) => (
                         <button key={t.vers} disabled={occupe}

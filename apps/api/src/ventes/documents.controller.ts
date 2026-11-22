@@ -1,10 +1,12 @@
 import {
-  Body, Controller, Delete, Get, Header, Param, Post, Query,
+  Body, Controller, Delete, Get, Header, Param, Post, Query, Res, StreamableFile,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { ApiTags } from '@nestjs/swagger';
 import { TypeDocumentVente } from '@prisma/client';
 import { DocumentsVenteService } from './documents.service';
 import { composerDocument, type DocumentImprimable } from './impression';
+import { composerDocumentPdf } from './pdf';
 import { Droits, Utilisateur, type UtilisateurConnecte } from '../auth/droits.decorator';
 import { PERMISSIONS } from '@gestglobale/shared';
 import { verifierAccesMagasin } from '../auth/magasin.util';
@@ -52,8 +54,42 @@ export class DocumentsVenteController {
   @Droits(PERMISSIONS.RAPPORT_SON_MAGASIN)
   @Header('Content-Type', 'text/html; charset=utf-8')
   async imprimer(@Param('numero') numero: string): Promise<string> {
+    return composerDocument(await this.aImprimer(numero));
+  }
+
+  /**
+   * Le meme document en PDF, produit par le serveur.
+   *
+   * L'impression HTML reste pour le back-office, ou le navigateur fait
+   * le travail. Ce PDF-ci existe pour ce que le navigateur ne peut pas
+   * faire : joindre une facture a un courriel sans qu'une personne
+   * clique quelque part. Les deux rendus partent du meme document et
+   * portent les memes mentions.
+   */
+  @Get(':numero/document.pdf')
+  @Droits(PERMISSIONS.RAPPORT_SON_MAGASIN)
+  async pdf(
+    @Param('numero') numero: string,
+    @Res({ passthrough: true }) reponse: Response,
+  ): Promise<StreamableFile> {
+    const imprimable = await this.aImprimer(numero);
+    const contenu = await composerDocumentPdf(imprimable);
+
+    // Le nom du fichier porte le numero du document : c'est ce que le
+    // client et le comptable chercheront dans leur boite de reception.
+    const nom = `${imprimable.numero.replace(/[^A-Za-z0-9-]/g, '-')}.pdf`;
+    reponse.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="${nom}"`,
+      'Content-Length': String(contenu.length),
+    });
+    return new StreamableFile(contenu);
+  }
+
+  /** Assemble le document dans la forme attendue par les deux rendus. */
+  private async aImprimer(numero: string): Promise<DocumentImprimable> {
     const document = await this.documents.parNumero(numero);
-    const imprimable: DocumentImprimable = {
+    return {
       numero: document.numero,
       type: document.type,
       statut: document.statut,
@@ -85,7 +121,6 @@ export class DocumentsVenteController {
       utilisateur: { nom: document.utilisateur.nom },
       documentSource: document.documentSource,
     };
-    return composerDocument(imprimable);
   }
 
   @Post()

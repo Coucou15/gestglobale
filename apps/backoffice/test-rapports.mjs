@@ -41,8 +41,12 @@ await page.waitForSelector('h1:has-text("Rapports")', { timeout: 15000 });
 await page.waitForTimeout(1500);
 
 // --- Synthese ----------------------------------------------------------
+// Depuis M11, l'ecran s'ouvre sur la consolidation du groupe : la
+// synthese d'un magasin se demande.
+await page.click('.barre-outils button:has-text("Synthese")');
+await page.waitForTimeout(1500);
 const corps = await page.textContent('body');
-etape('La synthese s’ouvre par defaut',
+etape('La synthese s’affiche',
   corps.includes('Chiffre d’affaires TTC') && corps.includes('Panier moyen'));
 etape('Les axes exiges par la section 9 sont tous presents',
   ['Par jour', 'Par heure', 'Par caisse', 'Par caissier', 'Par rayon et famille',

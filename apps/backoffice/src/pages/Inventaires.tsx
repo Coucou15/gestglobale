@@ -3,6 +3,7 @@ import { appeler, formaterDA, formaterDate, formaterQuantite } from '../client';
 import { ChercheurArticle, type ArticleTrouve } from '../composants/ChercheurArticle';
 import { useReferentiel } from '../composants/referentiel';
 import type { Utilisateur } from '../Application';
+import { ChoixMagasin } from '../composants/ChoixMagasin';
 
 interface InventaireListe {
   id: string; numero: string; type: string; statut: string; libelle: string | null;
@@ -49,7 +50,13 @@ export function Inventaires({ utilisateur }: { utilisateur: Utilisateur }) {
   const [type, setType] = useState<'TOURNANT' | 'COMPLET'>('TOURNANT');
   const [libelle, setLibelle] = useState('');
 
-  const magasin = magasins[0];
+  // Le magasin est choisi, jamais devine : voir ChoixMagasin.
+  const [magasinId, setMagasinId] = useState('');
+  const magasin = magasins.find((m) => m.id === magasinId) ?? magasins[0];
+
+  useEffect(() => {
+    if (!magasinId && magasins.length > 0) setMagasinId(magasins[0].id);
+  }, [magasins, magasinId]);
   const peutValider = utilisateur.permissions.includes('stock.inventaire_valider');
 
   const charger = async () => {
@@ -174,13 +181,20 @@ export function Inventaires({ utilisateur }: { utilisateur: Utilisateur }) {
       {ouverture && (
         <div className="carte" style={{ marginBottom: 24 }}>
           <h2 style={{ marginTop: 0, fontSize: 18 }}>Nouvel inventaire</h2>
+
           <div className="barre-outils">
-            <select value={emplacementId} onChange={(e) => setEmplacementId(e.target.value)}>
+            <ChoixMagasin magasins={magasins} valeur={magasin?.id ?? ''}
+              surChoix={setMagasinId} />
+          </div>
+          <div className="barre-outils">
+            <select id="emplacement" value={emplacementId}
+              onChange={(e) => setEmplacementId(e.target.value)}>
               {magasin.emplacements.map((e) => (
                 <option key={e.id} value={e.id}>{e.nom}</option>
               ))}
             </select>
-            <select value={type} onChange={(e) => setType(e.target.value as typeof type)}>
+            <select id="type-inventaire" value={type}
+              onChange={(e) => setType(e.target.value as typeof type)}>
               <option value="TOURNANT">Tournant — seulement les articles en stock</option>
               <option value="COMPLET">Complet — tout le catalogue</option>
             </select>

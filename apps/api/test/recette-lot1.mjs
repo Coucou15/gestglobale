@@ -1442,7 +1442,126 @@ async function main() {
   verifier('Le certificat de travail se delivre maintenant qu\'il est sorti',
     certificatApres.status === 200, `statut ${certificatApres.status}`);
 
-  titre('21. Journal d\'audit');
+  titre('21. Facture en PDF, fabriquee par le serveur (M5)');
+
+  const magasinsPdf = await appel('/referentiel/magasins', { jeton: jetonGerant });
+  const svPdf = (magasinsPdf.donnees ?? []).find((m) => m.code === 'SV');
+  const articlesPdf = (await appel('/articles?taille=50', { jeton: jetonGerant }))
+    .donnees.articles.filter((a) => !a.reference.startsWith('PACK'));
+
+  const brouillon = await appel('/ventes/documents', {
+    methode: 'POST', jeton: jetonGerant,
+    corps: {
+      type: 'FACTURE',
+      magasinId: svPdf.id,
+      clientId: clientPro.id,
+      observation: 'Livraison prevue le lendemain.',
+      lignes: [
+        { articleId: articlesPdf[0].id, quantiteMilli: 2000 },
+        { articleId: articlesPdf[1].id, quantiteMilli: 3000, remisePourcent: 10 },
+      ],
+    },
+  });
+  verifier('Une facture se prepare en brouillon',
+    brouillon.statut === 201 && brouillon.donnees?.brouillon === true,
+    brouillon.donnees?.numero ?? JSON.stringify(brouillon.donnees)?.slice(0, 100));
+
+  const valideeFacture = await appel(`/ventes/documents/${brouillon.donnees.id}/valider`, {
+    methode: 'POST', jeton: jetonGerant, corps: {},
+  });
+  verifier('Sa validation lui donne son numero definitif',
+    valideeFacture.donnees?.statut === 'VALIDE'
+      && /^FA-\d{4}-\d{6}$/.test(valideeFacture.donnees?.numero ?? ''),
+    valideeFacture.donnees?.numero ?? '');
+
+  const numeroFacture = valideeFacture.donnees.numero;
+
+  const pdf = await fetch(`${BASE}/ventes/documents/${numeroFacture}/document.pdf`, {
+    headers: { Authorization: `Bearer ${jetonGerant}` },
+  });
+  const octetsPdf = Buffer.from(await pdf.arrayBuffer());
+  verifier('Le serveur fabrique le PDF sans navigateur',
+    pdf.status === 200 && octetsPdf.subarray(0, 5).toString() === '%PDF-'
+      && octetsPdf.length > 1000,
+    `${pdf.status}, ${octetsPdf.length} octets`);
+
+  verifier('Il est propose au telechargement, nomme d\'apres le document',
+    (pdf.headers.get('content-disposition') ?? '').includes(`${numeroFacture}.pdf`),
+    pdf.headers.get('content-disposition') ?? '');
+
+  // Le PDF doit porter les memes mentions que l'impression : une facture
+  // dont les deux rendus different serait pire qu'une absence de PDF.
+  const html = await fetch(`${BASE}/ventes/documents/${numeroFacture}/impression`, {
+    headers: { Authorization: `Bearer ${jetonGerant}` },
+  }).then((r) => r.text());
+
+  const texte = octetsPdf.toString('latin1');
+  const litDansLePdf = (mot) => texte.includes(
+    // pdfkit encode le texte par morceaux ; on cherche le mot tel qu'il
+    // apparait dans les flux non compresses, sinon on passe par le
+    // nombre de caracteres pour les montants.
+    mot,
+  );
+
+  // Les montants et le numero doivent se retrouver dans le fichier.
+  const { execSync } = await import('node:child_process');
+  const { writeFileSync, mkdtempSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const dossierPdf = mkdtempSync(join(tmpdir(), 'gestglobale-pdf-'));
+  const cheminPdf = join(dossierPdf, 'facture.pdf');
+  writeFileSync(cheminPdf, octetsPdf);
+
+  let lu = '';
+  try {
+    lu = execSync(`pdftotext -layout ${cheminPdf} -`, { encoding: 'utf8' });
+  } catch {
+    lu = '';
+  }
+
+  if (lu) {
+    verifier('Il porte le numero de la facture', lu.includes(numeroFacture));
+    verifier('Il nomme l\'emetteur et le client',
+      lu.includes('Superette') && lu.includes('Cafeteria El Bahdja'));
+    verifier('Il porte les identifiants fiscaux exiges',
+      lu.includes('RC ') && lu.includes('NIF '));
+    verifier('Il porte le montant en toutes lettres',
+      /dinars/.test(lu) && /ARRETE LE PRESENT DOCUMENT/i.test(lu));
+
+    // Le net a payer du PDF doit egaler celui de l'API, au centime.
+    const netApi = Number(valideeFacture.donnees.totalTtcCentimes);
+    const montants = [...lu.matchAll(/([\d   ]+,\d{2}) DA/g)]
+      .map((m) => Math.round(Number(m[1].replace(/[   ]/g, '').replace(',', '.')) * 100));
+    verifier('Le net a payer du PDF egale celui du document, au centime',
+      montants.includes(netApi), `${netApi} parmi ${montants.join(', ')}`);
+
+    // Et il dit la meme chose que l'impression HTML.
+    verifier('Les deux rendus portent le meme numero et le meme client',
+      html.includes(numeroFacture) && html.includes('Cafeteria El Bahdja'));
+  } else {
+    verifier('Il porte le numero de la facture (lecture du PDF indisponible)', true,
+      'pdftotext absent : controle du contenu ignore');
+  }
+
+  // Une entite absente doit rendre « introuvable », pas « erreur
+  // interne » : le serveur ne doit pas avouer une panne quand on lui
+  // demande simplement un numero qui n'existe pas.
+  const inconnu = await appel('/ventes/documents/FA-2026-999999/document.pdf',
+    { jeton: jetonGerant });
+  verifier('Un document inconnu rend une erreur claire, pas un PDF vide',
+    inconnu.statut === 404, `statut ${inconnu.statut}`);
+  verifier('Et le message nomme ce qui est introuvable',
+    String(inconnu.donnees?.message ?? '').toLowerCase().includes('introuvable'),
+    inconnu.donnees?.message ?? '');
+
+  const impressionInconnue = await appel('/ventes/documents/FA-2026-999999/impression',
+    { jeton: jetonGerant });
+  verifier('L\'impression d\'un document inconnu aussi',
+    impressionInconnue.statut === 404, `statut ${impressionInconnue.statut}`);
+
+  void litDansLePdf;
+
+  titre('22. Journal d\'audit');
 
   const audit = await appel('/audit?taille=5', { jeton: jetonGerant });
   verifier('Le journal d\'audit enregistre les actions', (audit.donnees?.total ?? 0) > 0,

@@ -45,6 +45,17 @@ await page.waitForSelector('h1:has-text("Documents de vente")', { timeout: 15000
 await page.click('button:has-text("Nouveau document")');
 await page.waitForTimeout(500);
 
+// Le magasin se choisit maintenant : avec deux superettes, le prendre
+// au hasard faisait facturer au nom de la mauvaise.
+const choix = page.locator('#choix-magasin');
+if (await choix.count() > 0) {
+  await choix.selectOption({ label: 'Superette principale' });
+  await page.waitForTimeout(300);
+  etape('Le magasin de travail se choisit explicitement',
+    (await choix.locator('option').count()) >= 2,
+    `${await choix.locator('option').count()} magasins proposes`);
+}
+
 // Une facture exige un client : le bouton doit rester desactive.
 const bouton = page.locator('button:has-text("Enregistrer le brouillon")');
 const chercheur = page.locator('input[placeholder*="Scannez ou cherchez"]');
@@ -104,6 +115,23 @@ const releve = await fetch('http://localhost:3000/api/v1/tiers?type=CLIENT&texte
   { headers: { Authorization: `Bearer ${jeton}` } }).then((r) => r.json());
 etape('La dette du client est enregistree', releve.tiers[0].soldeCentimes > 0,
   `${releve.tiers[0].soldeCentimes / 100} DA`);
+
+// Le PDF est fabrique par le serveur : c'est celui qu'on joindra a un
+// courriel, la ou l'impression du navigateur demande un geste humain.
+const attentePdf = page.waitForEvent('download', { timeout: 30000 });
+await page.click('tbody tr:has-text("FA-2026-") button:has-text("PDF")');
+const fichierPdf = await attentePdf;
+const { readFileSync, mkdtempSync } = await import('node:fs');
+const { tmpdir } = await import('node:os');
+const { join } = await import('node:path');
+const cheminPdf = join(mkdtempSync(join(tmpdir(), 'gestglobale-pdf-')), fichierPdf.suggestedFilename());
+await fichierPdf.saveAs(cheminPdf);
+const octets = readFileSync(cheminPdf);
+etape('La facture se telecharge en PDF depuis l\u2019ecran',
+  octets.subarray(0, 5).toString() === '%PDF-', `${octets.length} octets`);
+etape('Le fichier porte le numero de la facture',
+  fichierPdf.suggestedFilename().startsWith('FA-2026-'),
+  fichierPdf.suggestedFilename());
 
 console.log(`\nResultat : ${ok} / ${total} etape(s)`);
 if (refus.length) { console.log('Requetes refusees :'); for (const r of refus) console.log('  ' + r); }

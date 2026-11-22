@@ -25,14 +25,24 @@ function etape(nom, ok, detail = '') {
 }
 
 /** Choisit l'option dont le libelle contient ce fragment. */
-async function choisirOption(selecteur, fragment) {
-  const valeur = await selecteur.evaluate((element, f) => {
-    const option = Array.from(element.options).find(
-      (o) => (o.textContent ?? '').includes(f),
-    );
-    return option ? option.value : null;
-  }, fragment);
-  if (!valeur) throw new Error(`Aucune option contenant « ${fragment} »`);
+/**
+ * Choisit une option par son libelle.
+ *
+ * L'egalite d'abord, le fragment ensuite : depuis qu'il existe un
+ * « Coffre Bab Ezzouar », chercher « Coffre » par simple inclusion
+ * pouvait designer le mauvais compte — et le transfert partait du
+ * mauvais magasin sans que rien ne le signale.
+ */
+async function choisirOption(selecteur, libelle) {
+  const valeur = await selecteur.evaluate((element, l) => {
+    const options = Array.from(element.options);
+    const propre = (o) => (o.textContent ?? '').replace(/^[^:]*:\s*/, '').trim();
+    const exacte = options.find((o) => propre(o).split(' — ')[0] === l);
+    if (exacte) return exacte.value;
+    const approchante = options.find((o) => propre(o).includes(l));
+    return approchante ? approchante.value : null;
+  }, libelle);
+  if (!valeur) throw new Error(`Aucune option « ${libelle} »`);
   await selecteur.selectOption(valeur);
 }
 
@@ -80,10 +90,16 @@ async function attendreMessage(page, fragment, delai = 25000) {
   await page.click('button:has-text("Nouvelle reception")');
   await page.waitForSelector('select', { timeout: 5000 });
 
-  // Fournisseur : premiere option reelle.
-  const selects = page.locator('.carte select');
-  await selects.nth(0).selectOption({ index: 1 });
-  await selects.nth(1).selectOption({ index: 0 });
+  // Reperes par identifiant plutot que par position : l'ecran a gagne
+  // un choix de magasin, et un test qui compte les listes deroulantes
+  // casse au premier reamenagement.
+  const choixMagasin = page.locator('#choix-magasin');
+  if (await choixMagasin.count() > 0) {
+    await choixMagasin.selectOption({ label: 'Superette principale' });
+    await page.waitForTimeout(300);
+  }
+  await page.locator('#fournisseur').selectOption({ index: 1 });
+  await page.locator('#emplacement').selectOption({ index: 0 });
 
   // Deux articles ajoutes par la recherche.
   const chercheur = page.locator('input[placeholder*="Scannez ou cherchez"]');
@@ -137,8 +153,13 @@ async function attendreMessage(page, fragment, delai = 25000) {
   await page.waitForSelector('h1:has-text("Inventaires")', { timeout: 10000 });
   await page.click('button:has-text("Ouvrir un inventaire")');
   await page.waitForTimeout(400);
-  await page.locator('.carte select').nth(0).selectOption({ index: 1 });
-  await page.locator('.carte select').nth(1).selectOption('TOURNANT');
+  const magasinInventaire = page.locator('#choix-magasin');
+  if (await magasinInventaire.count() > 0) {
+    await magasinInventaire.selectOption({ label: 'Superette principale' });
+    await page.waitForTimeout(300);
+  }
+  await page.locator('#emplacement').selectOption({ index: 1 });
+  await page.locator('#type-inventaire').selectOption('TOURNANT');
   await page.fill('input[placeholder*="Libelle"]', 'Inventaire du rayon frais');
   await page.click('button:has-text("Ouvrir"):not(:has-text("un inventaire"))');
   await page.waitForSelector('.cartes .carte', { timeout: 15000 });
