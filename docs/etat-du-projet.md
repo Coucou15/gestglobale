@@ -272,7 +272,7 @@ bon vient peut-etre d'etre emis.
 | Performance rapports | rapport mensuel en moins de 5 s | **tenu et mesure** — 5,5 ms |
 | Capacite | 10 magasins, 30 caisses, 50 utilisateurs, 100 000 articles, 5 ans | **partiellement eprouve** — 30 000 articles et 2 caisses mesures ; 30 caisses simultanees et 5 ans d'historique restent a simuler |
 | Disponibilite | les caisses vendent meme serveur arrete | **tenu et verifie** |
-| Sauvegardes | chaque nuit, copie hors site, retention 30 jours, test mensuel | **a mettre en place** a l'installation |
+| Sauvegardes | chaque nuit, copie hors site, retention 30 jours, test mensuel | **fait** — outils livres et epreuve de restauration jouee ; reste a brancher le planificateur et le disque hors site chez le client. Voir [`sauvegardes.md`](sauvegardes.md) |
 | Securite | HTTPS, mots de passe chiffres, double authentification, aucun port de base ouvert | **tenu** cote applicatif ; le tunnel reste a installer |
 | Langues | francais et arabe, ecriture droite-gauche | **partiel** — les champs arabes existent, le ticket imprime en arabe ; l'interface n'est pas encore traduite |
 | Monnaie et formats | dinar, 2 decimales, dates JJ/MM/AAAA | **tenu** |
@@ -298,7 +298,7 @@ bon vient peut-etre d'etre emis.
 | Transfert inter-magasins : ce qui part, ce qui arrive et l'ecart sont traces separement | **verifie** — le groupe ne perd que la quantite reellement manquante |
 | Journaux comptables exportables au format du comptable | **verifie** — CSV relu ligne a ligne, totaux identiques a l'ecran au centime ; le format exact du cabinet reste a confirmer |
 | Le depart d'un employe coupe ses acces | **verifie** — apres la sortie, ni son code PIN, ni son mot de passe, ni le jeton qu'il avait en cours ne donnent plus la main |
-| Restauration complete depuis la sauvegarde de la veille en moins d'une heure | **a eprouver** a l'installation |
+| Restauration complete depuis la sauvegarde de la veille en moins d'une heure | **verifie** — base detruite puis rebatie au volume reel : 30 015 articles et 7 718 tiers restaures en 1,4 s, chiffres identiques et chaine d'audit intacte |
 
 ---
 
@@ -376,6 +376,8 @@ continuer, mais chacun changera du code s'il est tranche plus tard.
 4. Refaire le test de charge sur le serveur du client : le ProLiant
    ML330 G6 n'a pas de SSD et les durees y seront moins bonnes que dans
    l'environnement de developpement.
-5. Mettre en place les sauvegardes et le tunnel chiffre, puis eprouver une
-   restauration complete.
+5. Brancher les sauvegardes chez le client : planificateur de taches,
+   disque hors site, et mise au coffre de la phrase secrete. Les outils
+   et l'epreuve de restauration sont livres — voir
+   [`sauvegardes.md`](sauvegardes.md). Reste aussi le tunnel chiffre.
 6. Pilote sur un magasin, formation des caissiers, puis bascule.

@@ -295,6 +295,16 @@ journee de 430 tickets sur 2 caisses, 34 mesures de performance — dont
 les rapports, la consolidation du groupe, les journaux comptables et
 leurs exports — et un essai de remontee simultanee. Comptez une dizaine de minutes.
 
+```bash
+AVEC_VOLUME=1 bash scripts/eprouver-la-restauration.sh
+```
+
+Eprouve le critere de restauration du cahier des charges : la base est
+remplie au volume reel, sauvegardee, **detruite**, puis rebatie. Au
+dernier passage, 30 015 articles et 7 718 tiers restaures en 1,4 s,
+chiffres identiques et chaine d'empreintes du journal d'audit intacte.
+Voir [`docs/sauvegardes.md`](docs/sauvegardes.md).
+
 Chaque suite part d'une base fraiche : la numerotation des documents est
 deterministe par caisse, donc rejouer une suite sur une base deja remplie
 ferait acquitter les documents comme « deja recus » — comportement

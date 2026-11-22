@@ -40,6 +40,49 @@ export function jsonCanonique(valeur: unknown): string {
  * Les ecritures sont sequentielles : le service serialise les appels pour
  * que la chaine reste coherente sous charge.
  */
+/** Champs d'une entree qui entrent dans son empreinte. */
+export interface ChampsEmpreinte {
+  date: Date | string;
+  utilisateurId: string | null;
+  action: string;
+  entite: string | null;
+  entiteId: string | null;
+  magasinId: string | null;
+  caisseId: string | null;
+  poste: string | null;
+  adresseIp: string | null;
+  details: unknown;
+}
+
+/**
+ * Empreinte d'une entree du journal.
+ *
+ * Une seule definition, parce qu'elle etait ecrite deux fois — a
+ * l'ecriture et a la verification — et qu'une formule en double finit
+ * toujours par diverger. Tout ce qui veut controler la chaine, outil de
+ * sauvegarde compris, passe par ici.
+ */
+export function empreinteDe(
+  entree: ChampsEmpreinte,
+  empreintePrecedente: string | null,
+): string {
+  const charge = jsonCanonique({
+    date: typeof entree.date === 'string' ? entree.date : entree.date.toISOString(),
+    utilisateurId: entree.utilisateurId ?? null,
+    action: entree.action,
+    entite: entree.entite ?? null,
+    entiteId: entree.entiteId ?? null,
+    magasinId: entree.magasinId ?? null,
+    caisseId: entree.caisseId ?? null,
+    poste: entree.poste ?? null,
+    adresseIp: entree.adresseIp ?? null,
+    details: entree.details ?? null,
+  });
+  return createHash('sha256')
+    .update(`${empreintePrecedente ?? 'origine'}|${charge}`)
+    .digest('hex');
+}
+
 @Injectable()
 export class AuditService {
   private readonly logger = new Logger(AuditService.name);
@@ -66,23 +109,11 @@ export class AuditService {
     });
 
     const date = new Date();
-    const charge = jsonCanonique({
-      date: date.toISOString(),
-      utilisateurId: entree.utilisateurId ?? null,
-      action: entree.action,
-      entite: entree.entite ?? null,
-      entiteId: entree.entiteId ?? null,
-      magasinId: entree.magasinId ?? null,
-      caisseId: entree.caisseId ?? null,
-      poste: entree.poste ?? null,
-      adresseIp: entree.adresseIp ?? null,
-      details: entree.details ?? null,
-    });
-
     const empreintePrecedente = precedente?.empreinte ?? null;
-    const empreinte = createHash('sha256')
-      .update(`${empreintePrecedente ?? 'origine'}|${charge}`)
-      .digest('hex');
+    const empreinte = empreinteDe(
+      { ...entree, date, utilisateurId: entree.utilisateurId ?? null } as ChampsEmpreinte,
+      empreintePrecedente,
+    );
 
     await this.prisma.journalAudit.create({
       data: {
@@ -127,21 +158,7 @@ export class AuditService {
         if (ligne.empreintePrecedente !== attendue) {
           return { intact: false, ruptureAuNumero: ligne.numero.toString() };
         }
-        const charge = jsonCanonique({
-          date: ligne.date.toISOString(),
-          utilisateurId: ligne.utilisateurId,
-          action: ligne.action,
-          entite: ligne.entite,
-          entiteId: ligne.entiteId,
-          magasinId: ligne.magasinId,
-          caisseId: ligne.caisseId,
-          poste: ligne.poste,
-          adresseIp: ligne.adresseIp,
-          details: ligne.details ?? null,
-        });
-        const recalculee: string = createHash('sha256')
-          .update(`${ligne.empreintePrecedente ?? 'origine'}|${charge}`)
-          .digest('hex');
+        const recalculee = empreinteDe(ligne, ligne.empreintePrecedente);
         if (recalculee !== ligne.empreinte) {
           return { intact: false, ruptureAuNumero: ligne.numero.toString() };
         }
