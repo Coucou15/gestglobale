@@ -144,8 +144,9 @@ async function main(): Promise<void> {
         pinHash: empreintePin,
         importeDepuis: 'ancien logiciel',
         magasins: {
-          create: compte.login === 'gerant'
-            // Le gerant du groupe consolide : il lui faut les deux.
+          create: compte.login === 'gerant' || compte.login === 'comptable'
+            // Le gerant consolide et le comptable tient les journaux des
+            // deux magasins : il leur faut l'un et l'autre.
             ? [{ magasinId: magasin.id }, { magasinId: magasinBab.id }]
             : [{ magasinId: magasin.id }],
         },

@@ -1,11 +1,16 @@
-import { PERMISSIONS_PAR_ROLE, type CodeRole, type Permission } from '@gestglobale/shared';
+import {
+  PERMISSIONS_PAR_ROLE, avecDroitsImpliques, type CodeRole, type Permission,
+} from '@gestglobale/shared';
 
 /**
  * Permissions effectives d'un utilisateur :
- *   permissions du role + droits ajoutes individuellement - droits retires.
+ *   permissions du role + droits ajoutes individuellement - droits retires,
+ *   puis les droits que ceux-la entrainent.
  *
- * Cet ordre est volontaire : un retrait l'emporte toujours sur un ajout,
- * pour qu'un retrait explicite ne puisse jamais etre contourne.
+ * L'ordre est volontaire : un retrait l'emporte toujours sur un ajout,
+ * pour qu'un retrait explicite ne puisse jamais etre contourne. Les
+ * implications viennent en dernier, de sorte qu'un droit large redonne
+ * bien les droits plus etroits qu'il recouvre.
  */
 export function permissionsEffectives(utilisateur: {
   role: string;
@@ -18,7 +23,12 @@ export function permissionsEffectives(utilisateur: {
 
   const effectives = new Set<string>([...duRole, ...ajoutees]);
   for (const retiree of retirees) effectives.delete(retiree);
-  return [...effectives];
+
+  // Un droit retire explicitement ne doit pas revenir par la bande :
+  // on retire a nouveau apres avoir applique les implications.
+  const complets = new Set(avecDroitsImpliques([...effectives]));
+  for (const retiree of retirees) complets.delete(retiree);
+  return [...complets];
 }
 
 function listeDeJson(valeur: unknown): string[] {

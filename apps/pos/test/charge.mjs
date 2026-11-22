@@ -349,6 +349,47 @@ async function main() {
     appel('/transferts/en-transit', gerant.jeton));
   verifierUnique('Marchandise en transit', dureeTransit, 5000);
 
+  // Journaux comptables (M12) : le journal des ventes charge chaque
+  // piece du mois avec ses lignes, pour en tirer la ventilation de TVA.
+  //
+  // La periode est donnee explicitement : les journaux s'ouvrent par
+  // defaut sur le mois precedent, qu'un comptable traite une fois clos.
+  // Mesurer sans la preciser revenait a chronometrer une page vide.
+  const moisEnCours = (() => {
+    const d = new Date();
+    const debut = new Date(d.getFullYear(), d.getMonth(), 1);
+    const fin = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+    return `debut=${debut.toISOString()}&fin=${fin.toISOString()}`;
+  })();
+  const { duree: dureeJournalVentes } = await chrono(() =>
+    appel(`/comptabilite/journal-ventes?${moisEnCours}`, gerant.jeton));
+  verifierUnique('Journal des ventes du mois', dureeJournalVentes, 5000);
+
+  const { duree: dureeJournalTreso } = await chrono(() =>
+    appel(`/comptabilite/journal-tresorerie?${moisEnCours}`, gerant.jeton));
+  verifierUnique('Journal de tresorerie du mois', dureeJournalTreso, 5000);
+
+  const { duree: dureeDeclaration } = await chrono(() =>
+    appel(`/comptabilite/declaration?${moisEnCours}`, gerant.jeton));
+  verifierUnique('Etat pour les declarations', dureeDeclaration, 5000);
+
+  const { duree: dureeCsv, resultat: csv } = await chrono(async () => {
+    const reponse = await fetch(
+      `${BASE_API}/comptabilite/journal-ventes/export.csv?${moisEnCours}`, {
+        headers: { Authorization: `Bearer ${gerant.jeton}` },
+      });
+    if (!reponse.ok) throw new Error(`export csv : ${reponse.status}`);
+    return Buffer.from(await reponse.arrayBuffer());
+  });
+  verifierUnique(
+    `Journal des ventes en CSV (${Math.round(csv.length / 1024)} Ko)`, dureeCsv, 10000,
+  );
+  // Un CSV vide passerait toutes les mesures de temps sans rien prouver.
+  if (csv.length < 10000) {
+    echecs++;
+    console.log('  ECHEC Le CSV mesure est quasi vide : la periode ne couvre pas les ventes');
+  }
+
   // ----------------------------------------------------------------
   titre('7 bis. Exports Excel et PDF au volume reel');
 

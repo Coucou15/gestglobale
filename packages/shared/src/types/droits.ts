@@ -148,6 +148,43 @@ export const PERMISSIONS_PAR_ROLE: Record<CodeRole, Permission[]> = {
   GERANT: TOUTES_PERMISSIONS,
 };
 
+/**
+ * Droits qu'un droit plus large entraine.
+ *
+ * Un droit nomme « tous les rapports » qui n'ouvrirait pas le rapport
+ * d'un magasin serait un piege : le comptable, a qui la section 6
+ * accorde tous les rapports, se voyait refuser le tableau de bord du
+ * jour parce que la route exige « rapport.son_magasin ». Plutot que de
+ * lister les deux droits partout, l'implication est declaree ici une
+ * fois, et appliquee au calcul des droits effectifs.
+ */
+export const DROITS_IMPLIQUES: Partial<Record<Permission, Permission[]>> = {
+  [PERMISSIONS.RAPPORT_TOUS]: [
+    PERMISSIONS.RAPPORT_SON_MAGASIN,
+    PERMISSIONS.RAPPORT_SA_CAISSE,
+    PERMISSIONS.RAPPORT_STOCKS,
+    PERMISSIONS.RAPPORT_ACHATS,
+  ],
+  [PERMISSIONS.RAPPORT_SON_MAGASIN]: [PERMISSIONS.RAPPORT_SA_CAISSE],
+};
+
+/**
+ * Ajoute a une liste de droits ceux qu'ils entrainent.
+ *
+ * Applique une seule fois : les implications ci-dessus n'ont pas de
+ * chaine a dérouler, et une fermeture transitive cacherait le jour ou
+ * elles en auraient une.
+ */
+export function avecDroitsImpliques(droits: string[]): string[] {
+  const complets = new Set(droits);
+  for (const droit of droits) {
+    for (const implique of DROITS_IMPLIQUES[droit as Permission] ?? []) {
+      complets.add(implique);
+    }
+  }
+  return [...complets];
+}
+
 /** Libelles d'affichage des roles. */
 export const LIBELLES_ROLE: Record<CodeRole, string> = {
   CAISSIER: 'Caissier',

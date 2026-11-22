@@ -122,7 +122,17 @@ export function Rapports({ utilisateur }: { utilisateur: Utilisateur }) {
   };
 
   const charger = async () => {
-    setErreur(null); setOccupe(true);
+    setErreur(null);
+    // Pendant qu'on change les dates, l'une peut passer devant l'autre
+    // un instant. Interroger le serveur avec une periode impossible lui
+    // fait rendre une erreur que l'utilisateur voit clignoter sans
+    // comprendre : on la dit nous-memes, et on n'appelle pas.
+    if (debut > fin) {
+      setErreur('La date de debut doit preceder la date de fin.');
+      setResultat(null);
+      return;
+    }
+    setOccupe(true);
     const demande = onglet;
     try {
       const chemin = demande === 'en-transit'

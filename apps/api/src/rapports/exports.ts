@@ -1,7 +1,7 @@
 import ExcelJS from 'exceljs';
 import PDFDocument from 'pdfkit';
 import {
-  alignement, cellule, formaterJour,
+  alignement, cellule, formaterHeure, formaterJour,
   type Bloc, type Colonne, type Rapport, type Sorte,
 } from './tableau';
 
@@ -325,4 +325,123 @@ function dessinerBloc(doc: Pdf, bloc: Bloc, largeurUtile: number): void {
 
   for (const ligne of bloc.lignes) ecrireLigne(ligne, false);
   if (bloc.total) ecrireLigne(bloc.total, true);
+}
+
+/* ------------------------------------------------------------------ */
+/* CSV                                                                */
+/* ------------------------------------------------------------------ */
+
+export interface OptionsCsv {
+  /**
+   * Separateur de colonnes. Le point-virgule par defaut : Excel en
+   * version francaise lit la virgule comme un separateur decimal, et
+   * un fichier a virgules s'y ouvre sur une seule colonne.
+   */
+  separateur?: ';' | ',' | '\t';
+  /**
+   * Marque d'ordre des octets. Sans elle, Excel sous Windows lit un
+   * fichier UTF-8 en ANSI et affiche « Superette » au lieu de
+   * « Supérette ». Avec elle, il reconnait l'encodage seul.
+   */
+  bom?: boolean;
+  /** Decimale des montants. La virgule en francais. */
+  decimale?: ',' | '.';
+}
+
+const CSV_DEFAUT: Required<OptionsCsv> = { separateur: ';', bom: true, decimale: ',' };
+
+/**
+ * Rendu CSV d'un rapport (M12).
+ *
+ * Un seul fichier plat, parce que c'est ce qu'un logiciel de
+ * comptabilite sait avaler. Quand le rapport a plusieurs blocs, ils se
+ * suivent, separes par une ligne vide et precedes de leur titre : le
+ * comptable retrouve ses tableaux, et un import automatique peut couper
+ * sur les lignes vides.
+ *
+ * Le format exact attendu par le comptable du client n'etant pas connu,
+ * le separateur, la decimale et la marque d'encodage sont des reglages,
+ * pas des constantes.
+ */
+export function enCsv(rapport: Rapport, options: OptionsCsv = {}): Buffer {
+  const reglages = { ...CSV_DEFAUT, ...options };
+  const lignes: string[] = [];
+
+  const echapper = (valeur: string): string => {
+    // Guillemets, separateur et retours a la ligne obligent a encadrer
+    // la valeur ; un guillemet interne se double.
+    if (
+      valeur.includes(reglages.separateur)
+      || valeur.includes('"')
+      || valeur.includes('\n')
+      || valeur.includes('\r')
+    ) {
+      return `"${valeur.replace(/"/g, '""')}"`;
+    }
+    return valeur;
+  };
+
+  const nombreCsv = (valeur: unknown, facteur: number): string => {
+    const n = Number(valeur);
+    if (!Number.isFinite(n)) return '';
+    const texte = (n / facteur).toFixed(facteur === 1000 ? 3 : 2);
+    return reglages.decimale === ',' ? texte.replace('.', ',') : texte;
+  };
+
+  const valeurCsv = (valeur: unknown, sorte: Sorte, unite?: unknown): string => {
+    if (valeur === null || valeur === undefined || valeur === '') return '';
+    switch (sorte) {
+      // Les montants partent en dinars, sans separateur de milliers :
+      // un espace insecable entre les chiffres casse tout import.
+      case 'montant': return nombreCsv(valeur, 100);
+      case 'quantite': return nombreCsv(valeur, 1000);
+      case 'nombre':
+      case 'pourcent': return String(Number(valeur));
+      case 'date': return formaterJour(valeur);
+      case 'horodatage': return `${formaterJour(valeur)} ${formaterHeure(valeur)}`;
+      case 'booleen': return valeur ? 'oui' : 'non';
+      default: return cellule(valeur, sorte, unite);
+    }
+  };
+
+  lignes.push(echapper(rapport.titre));
+  if (rapport.sousTitre) lignes.push(echapper(rapport.sousTitre));
+  for (const e of rapport.enTete ?? []) {
+    // Les chiffres mis en avant sont deja formates pour l'ecran, avec
+    // leurs separateurs de milliers — des espaces fines insecables que
+    // ni un tableur ni un import ne savent relire comme un nombre. On
+    // les retire : le fichier reste lisible, et ses valeurs restent des
+    // valeurs.
+    lignes.push([
+      echapper(e.intitule),
+      echapper(e.valeur.replace(/[\u202f\u00a0\u2009]/g, '')),
+    ].join(reglages.separateur));
+  }
+
+  for (const bloc of rapport.blocs) {
+    lignes.push('');
+    if (bloc.titre) lignes.push(echapper(bloc.titre));
+    lignes.push(bloc.colonnes.map((col) => echapper(col.titre)).join(reglages.separateur));
+
+    for (const source of bloc.lignes) {
+      lignes.push(bloc.colonnes
+        .map((col) => echapper(valeurCsv(source[col.cle], col.sorte ?? 'texte', source.unite)))
+        .join(reglages.separateur));
+    }
+    if (bloc.total) {
+      lignes.push(bloc.colonnes
+        .map((col) => echapper(valeurCsv(bloc.total![col.cle], col.sorte ?? 'texte')))
+        .join(reglages.separateur));
+    }
+  }
+
+  if (rapport.note) {
+    lignes.push('');
+    lignes.push(echapper(rapport.note.replace(/[\u202f\u00a0\u2009]/g, ' ')));
+  }
+
+  // Fins de ligne Windows : le poste du comptable est sous Windows, et
+  // un fichier en \n s'y affiche parfois sur une seule ligne.
+  const texte = lignes.join('\r\n') + '\r\n';
+  return Buffer.from((reglages.bom ? '﻿' : '') + texte, 'utf8');
 }

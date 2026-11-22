@@ -26,7 +26,7 @@ a venir = non commence.
 | M9 | Tableaux de bord et rapports | 2 | **fait** — sept rapports, chacun exportable en Excel et en PDF, et resume quotidien du gerant ; reste a fournir un relais de messagerie pour l'envoi |
 | M10 | Fidelite et promotions | 2 | **fait** — promotions, points de fidelite, cartes cadeaux et bons d'achat, appliques en caisse hors ligne comprise |
 | M11 | Multi-magasins | 2 | **fait** — catalogue central, prix par magasin, transferts inter-magasins a deux temps avec bon d'expedition et bon de reception, consolidation du groupe |
-| M12 | Comptabilite et exports | 3 | *partiel* — historique de l'ancien logiciel repris et consultable ; journaux et etats fiscaux a faire |
+| M12 | Comptabilite et exports | 3 | **fait** — journaux des ventes, des achats et de tresorerie, exports CSV, Excel et PDF, etat pour les declarations ; le regime fiscal reste a confirmer avec le comptable |
 | M13 | Gestion du personnel | 3 | *partiel* — modele de donnees complet ; fonctionnalites a faire |
 
 ### Detail des modules du lot 1
@@ -158,6 +158,35 @@ tresorerie du siege y figure a part, parce qu'elle n'appartient a aucun
 magasin. La marchandise en transit a sa colonne : la confondre avec du
 stock vendable ferait croire a une disponibilite qui n'existe pas.
 
+**M12 — Comptabilite et exports.** Trois journaux — ventes, achats,
+tresorerie — et un etat pour les declarations. Ils sortent des memes
+ecritures que les rapports du gerant, mais presentes comme un comptable
+les attend : une ligne par piece, dans l'ordre des dates, avec son
+numero, son tiers et sa ventilation de TVA.
+
+Chacun s'exporte en **CSV** pour le logiciel du comptable, en **Excel**
+pour le travail a la main, en **PDF** pour l'archive. Le format exact
+que son cabinet attend n'etant pas connu, le separateur, la decimale et
+la marque d'encodage sont des reglages de l'ecran, pas des constantes.
+Par defaut : point-virgule, virgule decimale, marque d'encodage — ce
+qu'Excel en version francaise sait ouvrir d'un double-clic.
+
+Les pieces annulees figurent au journal avec leur statut plutot que
+d'en etre retirees : effacer une piece annulee laisserait un trou dans
+la numerotation que personne ne pourrait expliquer.
+
+**L'etat pour les declarations n'est pas une declaration remplie**, et
+l'ecran le dit. Il donne le chiffre d'affaires et la TVA par taux, la
+TVA deductible sur achats, le droit de timbre, et la difference entre
+collectee et deductible. Seul votre comptable peut reporter ces
+montants dans les cases du formulaire. Ce que GestGlobale garantit,
+c'est que chaque total vient des pieces, au centime, et qu'on peut
+remonter de ce tableau aux lignes qui le composent.
+
+Sur les donnees reprises de l'ancien logiciel, **toutes les ventes sont
+a TVA 0**. L'etat le signale au lieu de le masquer : c'est precisement
+le point a trancher avec votre comptable.
+
 **M10 — Promotions, fidelite, cartes cadeaux.** Quatre sortes de
 promotions (prix barre, X achetes Y offerts, remise par famille, happy
 hour avec plage horaire pouvant franchir minuit), declarees au
@@ -230,6 +259,7 @@ bon vient peut-etre d'etre emis.
 | Consultation des ventes du jour depuis un smartphone hors du magasin | **verifie** en navigateur mobile ; reste a eprouver via le tunnel |
 | Rapport mensuel rendu en moins de 5 secondes | **verifie au volume reel** — 27 ms pour la synthese, 159 ms pour les ruptures sur 30 000 articles, 176 ms pour la consolidation ; les exports Excel et PDF tiennent sous 210 ms |
 | Transfert inter-magasins : ce qui part, ce qui arrive et l'ecart sont traces separement | **verifie** — le groupe ne perd que la quantite reellement manquante |
+| Journaux comptables exportables au format du comptable | **verifie** — CSV relu ligne a ligne, totaux identiques a l'ecran au centime ; le format exact du cabinet reste a confirmer |
 | Restauration complete depuis la sauvegarde de la veille en moins d'une heure | **a eprouver** a l'installation |
 
 ---
@@ -244,7 +274,11 @@ continuer, mais chacun changera du code s'il est tranche plus tard.
    defaut**. Les valeurs a retenir sont a confirmer avec votre comptable.
 
 2. **Regime de TVA.** Presque tous les produits sont a TVA 0 dans
-   l'export actuel. A confirmer avant les etats fiscaux du lot 3.
+   l'export actuel. L'etat pour les declarations fonctionne et le
+   signale a chaque edition, mais tant que le regime n'est pas
+   confirme, les taux portes par le catalogue sont ceux de l'ancien
+   logiciel : c'est a verifier avec votre comptable avant la premiere
+   declaration faite avec GestGlobale.
 
 3. **Arrondi des especes.** Un total de ticket tombe sur n'importe quel
    centime, la plus petite coupure vaut 5 DA. Faut-il arrondir le montant

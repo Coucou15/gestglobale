@@ -952,7 +952,187 @@ async function main() {
     }
   }
 
-  titre('16. Journal d\'audit');
+  titre('16. Journaux comptables et declarations (M12)');
+
+  const journalVentes = await appel(`/comptabilite/journal-ventes?${surLeMois}`,
+    { jeton: jetonGerant });
+  verifier('Le journal des ventes repond', journalVentes.statut === 200);
+
+  // Le journal et la synthese du gerant doivent porter le meme total :
+  // deux chiffres differents pour la meme periode ruineraient la
+  // confiance des deux cotes.
+  verifier('Il s\'accorde au centime avec la synthese de periode',
+    Number(journalVentes.donnees?.totaux?.totalTtcCentimes)
+      === Number(synthese.donnees?.chiffreAffairesTtcCentimes),
+    `${journalVentes.donnees?.totaux?.totalTtcCentimes} contre ${synthese.donnees?.chiffreAffairesTtcCentimes}`);
+
+  verifier('Une ligne porte sa piece, son client et son reglement',
+    (journalVentes.donnees?.lignes ?? []).every(
+      (l) => typeof l.numero === 'string' && 'clientNom' in l && 'reglements' in l));
+
+  verifier('Les reglements y sont nommes en clair, comme sur le ticket',
+    (journalVentes.donnees?.lignes ?? []).some((l) => l.reglements.includes('Especes'))
+      && !(journalVentes.donnees?.lignes ?? []).some((l) => l.reglements.includes('BON_ACHAT')),
+    journalVentes.donnees?.lignes?.[0]?.reglements ?? '');
+
+  // La ventilation par taux doit se recouper avec le total du journal.
+  const sommeVentilation = (journalVentes.donnees?.totaux?.parTaux ?? [])
+    .reduce((t, v) => t + Number(v.htCentimes) + Number(v.tvaCentimes), 0);
+  verifier('La ventilation par taux redonne le total hors timbre et hors remise',
+    sommeVentilation === Number(journalVentes.donnees.totaux.totalTtcCentimes)
+      - Number(journalVentes.donnees.totaux.timbreCentimes),
+    `${sommeVentilation} contre ${Number(journalVentes.donnees.totaux.totalTtcCentimes)
+      - Number(journalVentes.donnees.totaux.timbreCentimes)}`);
+
+  const journalAchats = await appel(`/comptabilite/journal-achats?${surLeMois}`,
+    { jeton: jetonGerant });
+  verifier('Le journal des achats repond', journalAchats.statut === 200
+    && Array.isArray(journalAchats.donnees?.lignes));
+
+  const journalTresorerie = await appel(`/comptabilite/journal-tresorerie?${surLeMois}`,
+    { jeton: jetonGerant });
+  verifier('Le journal de tresorerie repond', journalTresorerie.statut === 200);
+  verifier('Il ventile par categorie',
+    Array.isArray(journalTresorerie.donnees?.parCategorie)
+      && journalTresorerie.donnees.parCategorie.length > 0,
+    (journalTresorerie.donnees?.parCategorie ?? []).map((c) => c.categorie).join(', '));
+
+  const sommeCategories = (journalTresorerie.donnees?.parCategorie ?? [])
+    .reduce((t, c) => t + Number(c.entreesCentimes) - Number(c.sortiesCentimes), 0);
+  verifier('La ventilation par categorie redonne le solde de la periode',
+    sommeCategories === Number(journalTresorerie.donnees.totaux.soldeCentimes),
+    `${sommeCategories} contre ${journalTresorerie.donnees.totaux.soldeCentimes}`);
+
+  // Les encaissements en especes du journal doivent correspondre a ce
+  // que la tresorerie a reellement recu.
+  const especesJournal = (journalTresorerie.donnees?.parCategorie ?? [])
+    .find((c) => c.categorie === 'VENTE_COMPTANT');
+  const especesVentes = (synthese.donnees?.parModePaiement ?? [])
+    .find((m) => m.mode === 'ESPECES');
+  verifier('Les especes encaissees se retrouvent en tresorerie, au centime',
+    Number(especesJournal?.entreesCentimes) === Number(especesVentes?.montantCentimes),
+    `${especesJournal?.entreesCentimes} contre ${especesVentes?.montantCentimes}`);
+
+  const declaration = await appel(`/comptabilite/declaration?${surLeMois}`,
+    { jeton: jetonGerant });
+  verifier('L\'etat de declaration repond', declaration.statut === 200);
+  verifier('Le chiffre d\'affaires HT s\'accorde avec le journal des ventes',
+    Number(declaration.donnees?.ventes?.baseHtCentimes)
+      === Number(journalVentes.donnees?.totaux?.totalHtCentimes)
+        - Number(journalVentes.donnees?.totaux?.timbreCentimes),
+    `${declaration.donnees?.ventes?.baseHtCentimes} contre ${journalVentes.donnees?.totaux?.totalHtCentimes}`);
+
+  verifier('La TVA nette est la difference entre collectee et deductible',
+    Number(declaration.donnees?.tvaNetteCentimes)
+      === Number(declaration.donnees?.ventes?.tvaCollecteeCentimes)
+        - Number(declaration.donnees?.achats?.tvaDeductibleCentimes));
+
+  // Le jeu d'essai reprend le catalogue du client : tout y est a TVA 0.
+  // C'est precisement ce que le client doit trancher avec son comptable,
+  // et l'etat doit le dire plutot que de le masquer.
+  verifier('Le regime a TVA nulle est signale, pas masque',
+    declaration.donnees?.regimeATvaNulle === true,
+    `taux rencontres : ${(declaration.donnees?.ventes?.parTaux ?? []).map((t) => t.taux).join(', ')}`);
+
+  const vuMagasinier = await appel('/comptabilite/journal-ventes', { jeton: jetonCaissier });
+  verifier('Un caissier n\'accede pas aux journaux comptables',
+    vuMagasinier.statut === 403, `statut ${vuMagasinier.statut}`);
+
+  titre('17. Exports comptables (M12)');
+
+  const JOURNAUX = ['journal-ventes', 'journal-achats', 'journal-tresorerie', 'declaration'];
+
+  for (const nom of JOURNAUX) {
+    for (const format of ['csv', 'xlsx', 'pdf']) {
+      const reponse = await fetch(
+        `${BASE}/comptabilite/${nom}/export.${format}?${surLeMois}`,
+        { headers: { Authorization: `Bearer ${jetonGerant}` } },
+      );
+      const octets = Buffer.from(await reponse.arrayBuffer());
+      const signature = format === 'csv'
+        // Marque d'ordre des octets : sans elle, Excel sous Windows
+        // affiche « Superette » au lieu de « Supérette ».
+        ? octets.subarray(0, 3).toString('hex') === 'efbbbf'
+        : format === 'xlsx'
+          ? octets.subarray(0, 2).toString() === 'PK'
+          : octets.subarray(0, 5).toString() === '%PDF-';
+      verifier(`${nom}.${format} est un fichier ${format} valide`,
+        reponse.status === 200 && signature && octets.length > 100,
+        `${reponse.status}, ${octets.length} octets`);
+    }
+  }
+
+  // Le contenu du CSV doit etre relisible : c'est tout son interet.
+  const csvVentes = await fetch(
+    `${BASE}/comptabilite/journal-ventes/export.csv?${surLeMois}`,
+    { headers: { Authorization: `Bearer ${jetonGerant}` } },
+  ).then((r) => r.text());
+  const lignesCsv = csvVentes.split('\r\n').filter((l) => l.length > 0);
+
+  verifier('Le CSV se termine en fins de ligne Windows',
+    csvVentes.includes('\r\n') && !csvVentes.replace(/\r\n/g, '').includes('\n'));
+
+  const enteteColonnes = lignesCsv.find((l) => l.startsWith('Date;'));
+  verifier('Il porte une ligne d\'entete de colonnes',
+    enteteColonnes !== undefined && enteteColonnes.includes('Total TTC'),
+    enteteColonnes?.slice(0, 70) ?? '');
+
+  const premiereDonnee = lignesCsv[lignesCsv.indexOf(enteteColonnes) + 1];
+  const colonnes = premiereDonnee.split(';');
+  verifier('Chaque ligne a autant de colonnes que l\'entete',
+    colonnes.length === enteteColonnes.split(';').length,
+    `${colonnes.length} contre ${enteteColonnes.split(';').length}`);
+
+  // Les montants doivent etre relisibles comme des nombres : pas de
+  // separateur de milliers, une virgule decimale.
+  const montantsCsv = colonnes.filter((v) => /^-?\d+,\d{2}$/.test(v));
+  verifier('Les montants y sont des nombres relisibles, sans separateur de milliers',
+    montantsCsv.length >= 4, montantsCsv.join(' '));
+
+  verifier('Aucune espace insecable ne traine dans le fichier',
+    !/[   ]/.test(csvVentes));
+
+  // Le total du CSV doit egaler celui de l'API : un export qui
+  // s'ecarterait de l'ecran serait pire qu'une absence d'export.
+  // Le mot « Total » est pose dans la colonne « Piece », pas en tete de
+  // ligne : les premieres colonnes sont la date et le magasin, qu'une
+  // ligne de total laisse vides.
+  const ligneTotal = lignesCsv.find((l) => l.includes(';Total;'));
+  const totalCsv = ligneTotal
+    ? Number(ligneTotal.split(';').filter((v) => /^-?\d+,\d{2}$/.test(v)).pop()
+      ?.replace(',', '.')) * 100
+    : NaN;
+  verifier('Le total du CSV egale celui du journal, au centime',
+    Math.round(totalCsv) === Number(journalVentes.donnees.totaux.totalTtcCentimes),
+    `${Math.round(totalCsv)} contre ${journalVentes.donnees.totaux.totalTtcCentimes}`);
+
+  // Reglages du CSV : le format exact attendu par le comptable n'est
+  // pas connu, ils doivent donc etre modifiables.
+  const csvVirgule = await fetch(
+    `${BASE}/comptabilite/journal-ventes/export.csv?${surLeMois}&separateur=virgule&decimale=.&bom=false`,
+    { headers: { Authorization: `Bearer ${jetonGerant}` } },
+  ).then((r) => r.text());
+  verifier('Le separateur, la decimale et la marque d\'encodage se reglent',
+    !csvVirgule.startsWith('﻿')
+      && csvVirgule.includes('Pieces,')
+      && /\d+\.\d{2}/.test(csvVirgule),
+    csvVirgule.split('\r\n')[2] ?? '');
+
+  const separateurInconnu = await appel(
+    '/comptabilite/journal-ventes/export.csv?separateur=pipe', { jeton: jetonGerant });
+  verifier('Un separateur inconnu est refuse en nommant ceux qui marchent',
+    separateurInconnu.statut === 400
+      && String(separateurInconnu.donnees?.message ?? '').includes('tabulation'),
+    String(separateurInconnu.donnees?.message ?? '').slice(0, 60));
+
+  const journalInconnu = await appel('/comptabilite/inexistant/export.csv',
+    { jeton: jetonGerant });
+  verifier('Un journal inconnu est refuse en nommant ceux qui existent',
+    journalInconnu.statut === 400
+      && String(journalInconnu.donnees?.message ?? '').includes('journal-tresorerie'),
+    String(journalInconnu.donnees?.message ?? '').slice(0, 60));
+
+  titre('18. Journal d\'audit');
 
   const audit = await appel('/audit?taille=5', { jeton: jetonGerant });
   verifier('Le journal d\'audit enregistre les actions', (audit.donnees?.total ?? 0) > 0,
