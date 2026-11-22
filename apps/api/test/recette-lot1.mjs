@@ -702,7 +702,257 @@ async function main() {
     reglages.donnees?.motDePasse === undefined,
     'seul « motDePasseEnregistre » est expose');
 
-  titre('14. Journal d\'audit');
+  titre('14. Transferts inter-magasins (M11)');
+
+  const magasins = await appel('/referentiel/magasins', { jeton: jetonGerant });
+  const magSv = (magasins.donnees ?? []).find((m) => m.code === 'SV');
+  const magBe = (magasins.donnees ?? []).find((m) => m.code === 'BE');
+  verifier('Le gerant voit les deux magasins du groupe',
+    magSv !== undefined && magBe !== undefined,
+    (magasins.donnees ?? []).map((m) => m.code).join(', '));
+
+  const depotSv = magSv.emplacements.find((e) => e.code === 'MC');
+  const depotBe = magBe.emplacements.find((e) => e.code === 'MC');
+
+  const etatDe = async (articleId) =>
+    (await appel(`/stocks/article/${articleId}`, { jeton: jetonGerant })).donnees.emplacements;
+  const quantiteA = (emplacements, codeMagasin, codeEmplacement) =>
+    emplacements.find(
+      (e) => e.code === codeEmplacement && e.magasin?.code === codeMagasin,
+    )?.quantiteMilli ?? 0;
+
+  const avant = await etatDe(huile.id);
+  const totalAvant = avant.reduce((t, e) => t + e.quantiteMilli, 0);
+  const depotSvAvant = quantiteA(avant, 'SV', 'MC');
+
+  // Deux refus de bon sens avant le cas nominal.
+  const memeMagasin = await appel('/transferts', {
+    methode: 'POST', jeton: jetonGerant,
+    corps: {
+      magasinSourceId: magSv.id, magasinDestinationId: magSv.id,
+      emplacementSourceId: depotSv.id,
+      emplacementDestinationId: magSv.emplacements.find((e) => e.code === 'SV').id,
+      lignes: [{ articleId: huile.id, quantiteMilli: 1000 }],
+    },
+  });
+  verifier('Un transfert vers le meme magasin est refuse, avec l\'alternative',
+    memeMagasin.statut === 400
+      && String(memeMagasin.donnees?.message ?? '').includes('emplacements'),
+    String(memeMagasin.donnees?.message ?? '').slice(0, 70));
+
+  const articleDouble = await appel('/transferts', {
+    methode: 'POST', jeton: jetonGerant,
+    corps: {
+      magasinSourceId: magSv.id, magasinDestinationId: magBe.id,
+      emplacementSourceId: depotSv.id, emplacementDestinationId: depotBe.id,
+      lignes: [
+        { articleId: huile.id, quantiteMilli: 1000 },
+        { articleId: huile.id, quantiteMilli: 2000 },
+      ],
+    },
+  });
+  verifier('Un article deux fois sur le meme bon est refuse',
+    articleDouble.statut === 400,
+    String(articleDouble.donnees?.message ?? '').slice(0, 70));
+
+  const bonCroise = await appel('/transferts', {
+    methode: 'POST', jeton: jetonGerant,
+    corps: {
+      magasinSourceId: magSv.id, magasinDestinationId: magBe.id,
+      emplacementSourceId: depotBe.id, emplacementDestinationId: depotBe.id,
+      lignes: [{ articleId: huile.id, quantiteMilli: 1000 }],
+    },
+  });
+  verifier('Un emplacement de depart hors du magasin expediteur est refuse',
+    bonCroise.statut === 400,
+    String(bonCroise.donnees?.message ?? '').slice(0, 70));
+
+  // Cas nominal : 10 bidons partent, 9 arrivent.
+  const bon = await appel('/transferts', {
+    methode: 'POST', jeton: jetonGerant,
+    corps: {
+      magasinSourceId: magSv.id, magasinDestinationId: magBe.id,
+      emplacementSourceId: depotSv.id, emplacementDestinationId: depotBe.id,
+      motif: 'Reapprovisionnement Bab Ezzouar',
+      lignes: [{ articleId: huile.id, quantiteMilli: 10000 }],
+    },
+  });
+  verifier('Un bon d\'expedition se prepare',
+    bon.donnees?.statut === 'PREPARE' && typeof bon.donnees?.numero === 'string',
+    bon.donnees?.numero ?? JSON.stringify(bon.donnees)?.slice(0, 80));
+
+  const pendantPreparation = await etatDe(huile.id);
+  verifier('Preparer un bon ne deplace rien',
+    quantiteA(pendantPreparation, 'SV', 'MC') === depotSvAvant);
+
+  const expedition = await appel(`/transferts/${bon.donnees.id}/expedition`, {
+    methode: 'POST', jeton: jetonGerant,
+  });
+  verifier('Le bon s\'expedie', expedition.donnees?.statut === 'EXPEDIE',
+    expedition.donnees?.statut ?? JSON.stringify(expedition.donnees)?.slice(0, 80));
+
+  const enRoute = await etatDe(huile.id);
+  verifier('Le depot expediteur est debite',
+    quantiteA(enRoute, 'SV', 'MC') === depotSvAvant - 10000,
+    `${depotSvAvant / 1000} -> ${quantiteA(enRoute, 'SV', 'MC') / 1000}`);
+  verifier('La marchandise est en transit chez l\'expediteur, pas chez le destinataire',
+    quantiteA(enRoute, 'SV', 'TR') === 10000 && quantiteA(enRoute, 'BE', 'MC') === 0,
+    `transit ${quantiteA(enRoute, 'SV', 'TR') / 1000}, arrivee ${quantiteA(enRoute, 'BE', 'MC') / 1000}`);
+  verifier('Rien ne se perd pendant le trajet',
+    enRoute.reduce((t, e) => t + e.quantiteMilli, 0) === totalAvant,
+    `${enRoute.reduce((t, e) => t + e.quantiteMilli, 0) / 1000} contre ${totalAvant / 1000}`);
+
+  const transitAvantReception = await appel('/transferts/en-transit', { jeton: jetonGerant });
+  verifier('Le rapport « en transit » montre la marchandise sur la route',
+    (transitAvantReception.donnees ?? []).some((t) => t.numero === bon.donnees.numero),
+    `${transitAvantReception.donnees?.length ?? 0} bon(s)`);
+
+  const doubleExpedition = await appel(`/transferts/${bon.donnees.id}/expedition`, {
+    methode: 'POST', jeton: jetonGerant,
+  });
+  verifier('Un bon deja expedie ne part pas une seconde fois',
+    doubleExpedition.statut === 400,
+    String(doubleExpedition.donnees?.message ?? '').slice(0, 60));
+
+  const reception = await appel(`/transferts/${bon.donnees.id}/reception`, {
+    methode: 'POST', jeton: jetonGerant,
+    corps: {
+      lignes: [{
+        articleId: huile.id, quantiteRecueMilli: 9000,
+        motifEcart: 'Un bidon casse sur le trajet',
+      }],
+      commentaire: 'Palette ouverte a l\'arrivee',
+    },
+  });
+  verifier('Le bon de reception se signe et porte son propre numero',
+    reception.donnees?.statut === 'RECU'
+      && typeof reception.donnees?.numeroReception === 'string',
+    reception.donnees?.numeroReception ?? JSON.stringify(reception.donnees)?.slice(0, 100));
+  verifier('L\'ecart est signale sur le bon', reception.donnees?.avecEcart === true);
+  verifier('L\'ecart est valorise au cout du depart',
+    reception.donnees?.valeurEcartCentimes
+      === -Math.round((1000 * reception.donnees.lignes[0].cumpCentimes) / 1000),
+    `${reception.donnees?.valeurEcartCentimes} centimes`);
+  verifier('Le motif de l\'ecart est conserve',
+    reception.donnees?.lignes?.[0]?.motifEcart === 'Un bidon casse sur le trajet');
+
+  const apresReception = await etatDe(huile.id);
+  verifier('Le destinataire recoit ce qui a ete compte, pas ce qui etait annonce',
+    quantiteA(apresReception, 'BE', 'MC') === 9000,
+    `${quantiteA(apresReception, 'BE', 'MC') / 1000} recu(s) pour 10 annonces`);
+  verifier('Le transit retombe a zero : plus rien sur la route',
+    quantiteA(apresReception, 'SV', 'TR') === 0,
+    `${quantiteA(apresReception, 'SV', 'TR') / 1000}`);
+
+  // La verification qui compte : le groupe ne doit avoir perdu que le
+  // bidon casse. C'est ce controle, et lui seul, qui revele un double
+  // decompte du manquant.
+  const totalApres = apresReception.reduce((t, e) => t + e.quantiteMilli, 0);
+  verifier('Le groupe a perdu exactement la quantite manquante, ni plus ni moins',
+    totalApres === totalAvant - 1000,
+    `${totalApres / 1000} contre ${(totalAvant - 1000) / 1000} attendus`);
+
+  const dejaRecu = await appel(`/transferts/${bon.donnees.id}/annulation`, {
+    methode: 'POST', jeton: jetonGerant, corps: { motif: 'Essai' },
+  });
+  verifier('Un bon deja receptionne ne s\'annule pas',
+    dejaRecu.statut === 400
+      && String(dejaRecu.donnees?.message ?? '').includes('sens inverse'),
+    String(dejaRecu.donnees?.message ?? '').slice(0, 70));
+
+  // Annulation d'un bon deja expedie : la marchandise revient au depart.
+  const bonRetour = await appel('/transferts', {
+    methode: 'POST', jeton: jetonGerant,
+    corps: {
+      magasinSourceId: magSv.id, magasinDestinationId: magBe.id,
+      emplacementSourceId: depotSv.id, emplacementDestinationId: depotBe.id,
+      lignes: [{ articleId: huile.id, quantiteMilli: 2000 }],
+    },
+  });
+  await appel(`/transferts/${bonRetour.donnees.id}/expedition`, {
+    methode: 'POST', jeton: jetonGerant,
+  });
+  const avantDemiTour = quantiteA(await etatDe(huile.id), 'SV', 'MC');
+  const demiTour = await appel(`/transferts/${bonRetour.donnees.id}/annulation`, {
+    methode: 'POST', jeton: jetonGerant, corps: { motif: 'Le camion a fait demi-tour' },
+  });
+  verifier('Un bon expedie s\'annule', demiTour.donnees?.statut === 'ANNULE');
+  const apresDemiTour = await etatDe(huile.id);
+  verifier('La marchandise revient au depot de depart',
+    quantiteA(apresDemiTour, 'SV', 'MC') === avantDemiTour + 2000,
+    `${avantDemiTour / 1000} -> ${quantiteA(apresDemiTour, 'SV', 'MC') / 1000}`);
+  verifier('Et le transit est vide',
+    quantiteA(apresDemiTour, 'SV', 'TR') === 0);
+  verifier('L\'annulation ne fait ni perdre ni creer de marchandise',
+    apresDemiTour.reduce((t, e) => t + e.quantiteMilli, 0) === totalApres);
+
+  const vuCaissier = await appel('/transferts', { jeton: jetonCaissier });
+  verifier('Un caissier ne gere pas les transferts',
+    vuCaissier.statut === 403, `statut ${vuCaissier.statut}`);
+
+  titre('15. Consolidation du groupe (M11)');
+
+  const consolide = await appel(`/rapports/consolidation?${surLeMois}`, { jeton: jetonGerant });
+  verifier('La consolidation repond', consolide.statut === 200);
+  verifier('Elle couvre les deux magasins',
+    (consolide.donnees?.magasins ?? []).length === 2,
+    (consolide.donnees?.magasins ?? []).map((m) => m.code).join(', '));
+
+  const sommeCa = (consolide.donnees?.magasins ?? [])
+    .reduce((t, m) => t + Number(m.chiffreAffairesTtcCentimes), 0);
+  verifier('Le chiffre d\'affaires du groupe est la somme des magasins',
+    sommeCa === Number(consolide.donnees?.groupe?.chiffreAffairesTtcCentimes),
+    `${sommeCa} contre ${consolide.donnees?.groupe?.chiffreAffairesTtcCentimes}`);
+
+  // La synthese et la consolidation doivent donner le meme total : deux
+  // chiffres differents pour la meme periode ruineraient la confiance.
+  verifier('Elle s\'accorde avec la synthese de periode',
+    Number(consolide.donnees?.groupe?.chiffreAffairesTtcCentimes)
+      === Number(synthese.donnees?.chiffreAffairesTtcCentimes),
+    `${consolide.donnees?.groupe?.chiffreAffairesTtcCentimes} contre ${synthese.donnees?.chiffreAffairesTtcCentimes}`);
+
+  const magasinBe = (consolide.donnees?.magasins ?? []).find((m) => m.code === 'BE');
+  verifier('Le magasin qui a recu la marchandise porte sa valeur en stock',
+    Number(magasinBe?.valeurStockCentimes) > 0,
+    `${magasinBe?.valeurStockCentimes} centimes`);
+  verifier('Plus rien n\'est en transit apres les receptions',
+    Number(consolide.donnees?.groupe?.valeurEnTransitCentimes) === 0,
+    `${consolide.donnees?.groupe?.valeurEnTransitCentimes}`);
+
+  verifier('La tresorerie du siege est comptee a part, pas imputee a un magasin',
+    consolide.donnees?.siege !== null
+      && Number(consolide.donnees?.siege?.nombreComptes) >= 1,
+    JSON.stringify(consolide.donnees?.siege));
+
+  const tresorerieMagasins = (consolide.donnees?.magasins ?? [])
+    .reduce((t, m) => t + Number(m.tresorerieCentimes), 0);
+  verifier('La tresorerie du groupe comprend les magasins et le siege',
+    Number(consolide.donnees?.groupe?.tresorerieCentimes)
+      === tresorerieMagasins + Number(consolide.donnees?.siege?.tresorerieCentimes ?? 0),
+    `${consolide.donnees?.groupe?.tresorerieCentimes}`);
+
+  // La synthese doit desormais porter l'axe « magasin » de la section 9.
+  verifier('La synthese porte l\'axe « par magasin »',
+    Array.isArray(synthese.donnees?.parMagasin) && synthese.donnees.parMagasin.length > 0,
+    JSON.stringify(synthese.donnees?.parMagasin?.[0] ?? null)?.slice(0, 80));
+
+  for (const format of ['xlsx', 'pdf']) {
+    for (const nom of ['consolidation', 'en-transit']) {
+      const reponse = await fetch(
+        `${BASE}/rapports/${nom}/export.${format}?${surLeMois}`,
+        { headers: { Authorization: `Bearer ${jetonGerant}` } },
+      );
+      const octets = Buffer.from(await reponse.arrayBuffer());
+      const signature = format === 'xlsx'
+        ? octets.subarray(0, 2).toString() === 'PK'
+        : octets.subarray(0, 5).toString() === '%PDF-';
+      verifier(`${nom}.${format} est un fichier ${format} valide`,
+        reponse.status === 200 && signature && octets.length > 500,
+        `${reponse.status}, ${octets.length} octets`);
+    }
+  }
+
+  titre('16. Journal d\'audit');
 
   const audit = await appel('/audit?taille=5', { jeton: jetonGerant });
   verifier('Le journal d\'audit enregistre les actions', (audit.donnees?.total ?? 0) > 0,

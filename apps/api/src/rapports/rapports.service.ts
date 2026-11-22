@@ -17,8 +17,9 @@ export class RapportsService {
   async periode(params: { magasinIds: string[]; debut: Date; fin: Date }) {
     const { magasinIds, debut, fin } = params;
 
-    const [totaux, parJour, parMode, parCaissier, parHeure, parCaisse, parFamille]
-      = await Promise.all([
+    const [
+      totaux, parJour, parMode, parCaissier, parHeure, parCaisse, parFamille, parMagasin,
+    ] = await Promise.all([
       this.prisma.$queryRaw<Array<{
         tickets: bigint; ca_ttc: bigint | null; ca_ht: bigint | null;
         marge: bigint | null; annulations: bigint;
@@ -112,6 +113,23 @@ export class RapportsService {
            AND d."statut" = 'VALIDE' AND l."annulee" = false
            AND d."dateVente" >= ${debut} AND d."dateVente" < ${fin}
          GROUP BY 1, 2 ORDER BY 4 DESC`,
+
+      // Par magasin : exige par la section 9, et socle de la
+      // consolidation du groupe (M11).
+      this.prisma.$queryRaw<Array<{
+        code: string; nom: string; tickets: bigint;
+        ca: bigint | null; marge: bigint | null;
+      }>>`
+        SELECT m."code", m."nom",
+               COUNT(*)                  AS tickets,
+               SUM(d."totalTtcCentimes") AS ca,
+               SUM(d."margeCentimes")    AS marge
+          FROM "DocumentVente" d
+          JOIN "Magasin" m ON m."id" = d."magasinId"
+         WHERE d."magasinId" = ANY(${magasinIds}::text[])
+           AND d."statut" = 'VALIDE'
+           AND d."dateVente" >= ${debut} AND d."dateVente" < ${fin}
+         GROUP BY 1, 2 ORDER BY 4 DESC`,
     ]);
 
     const t = totaux[0];
@@ -145,6 +163,13 @@ export class RapportsService {
       })),
       parCaisse: parCaisse.map((p) => ({
         numeroCaisse: p.numero,
+        nombreTickets: Number(p.tickets),
+        chiffreAffairesCentimes: c(p.ca),
+        margeCentimes: c(p.marge),
+      })),
+      parMagasin: parMagasin.map((p) => ({
+        code: p.code,
+        nom: p.nom,
         nombreTickets: Number(p.tickets),
         chiffreAffairesCentimes: c(p.ca),
         margeCentimes: c(p.marge),
@@ -257,31 +282,41 @@ export class RapportsService {
   async ruptures(params: { magasinIds: string[]; limite?: number }) {
     const limite = Math.min(params.limite ?? 200, 1000);
 
+    // Les ventes des 30 derniers jours sont agregees une seule fois, puis
+    // jointes. La version precedente posait une sous-requete correlee par
+    // ligne de stock : sur le volume reel, 53 918 lignes candidates la
+    // declenchaient chacune et le rapport mettait 58 secondes. Le meme
+    // calcul en une passe prend quelques millisecondes.
     const lignes = await this.prisma.$queryRaw<Array<{
       reference: string; designation: string; unite: string;
       emplacement: string; stock: number; seuil: number;
       ventes30j: bigint | null; derniere_sortie: Date | null;
     }>>`
+      WITH ventes_recentes AS (
+        SELECT l."articleId", SUM(l."quantiteMilli") AS quantite
+          FROM "LigneVente" l
+          JOIN "DocumentVente" d ON d."id" = l."documentId"
+         WHERE d."dateVente" >= NOW() - INTERVAL '30 days'
+           AND d."statut" = 'VALIDE' AND l."annulee" = false
+         GROUP BY 1
+      )
       SELECT a."reference", a."designation", a."unite"::text AS unite,
              e."code" AS emplacement,
              s."quantiteMilli"     AS stock,
              s."seuilAlerteMilli"  AS seuil,
-             (SELECT SUM(l."quantiteMilli")
-                FROM "LigneVente" l
-                JOIN "DocumentVente" d ON d."id" = l."documentId"
-               WHERE l."articleId" = a."id"
-                 AND l."annulee" = false AND d."statut" = 'VALIDE'
-                 AND d."dateVente" >= NOW() - INTERVAL '30 days') AS ventes30j,
-             s."derniereSortie" AS derniere_sortie
+             v."quantite"          AS ventes30j,
+             s."derniereSortie"    AS derniere_sortie
         FROM "Stock" s
         JOIN "Article" a      ON a."id" = s."articleId"
         JOIN "Emplacement" e  ON e."id" = s."emplacementId"
+        LEFT JOIN ventes_recentes v ON v."articleId" = a."id"
        WHERE e."magasinId" = ANY(${params.magasinIds}::text[])
+         AND e."type" <> 'TRANSIT'
          AND a."archive" = false
          AND a."venteAutorisee" = true
          AND (s."quantiteMilli" <= 0
               OR (s."seuilAlerteMilli" > 0 AND s."quantiteMilli" <= s."seuilAlerteMilli"))
-       ORDER BY (s."quantiteMilli" <= 0) DESC, 7 DESC NULLS LAST
+       ORDER BY (s."quantiteMilli" <= 0) DESC, v."quantite" DESC NULLS LAST
        LIMIT ${limite}`;
 
     return lignes.map((l) => ({
@@ -569,6 +604,159 @@ export class RapportsService {
         /** Remises au-dela du plafond, autorisees par un responsable. */
         nombreForcees: Number(r.forcees),
       })),
+    };
+  }
+  /**
+   * Consolidation du groupe (M11).
+   *
+   * Ventes, stocks et tresorerie de toutes les superettes, cote a cote
+   * puis additionnes. Le gerant du groupe doit pouvoir comparer ses
+   * magasins sur la meme page : c'est la seule facon de voir qu'une
+   * boutique decroche, ou qu'une autre immobilise trop de stock.
+   *
+   * La marchandise en transit apparait a part. Elle appartient encore au
+   * magasin expediteur, mais elle n'est plus dans ses rayons : la
+   * confondre avec du stock vendable ferait croire a une disponibilite
+   * qui n'existe pas.
+   */
+  async consolidation(params: { magasinIds: string[]; debut: Date; fin: Date }) {
+    const { magasinIds, debut, fin } = params;
+
+    const [magasins, ventes, stocks, transit, tresorerie, ruptures] = await Promise.all([
+      this.prisma.magasin.findMany({
+        where: { id: { in: magasinIds } },
+        select: { id: true, code: true, nom: true, actif: true },
+        orderBy: { code: 'asc' },
+      }),
+
+      this.prisma.$queryRaw<Array<{
+        magasin_id: string; tickets: bigint; ca: bigint | null;
+        ca_ht: bigint | null; marge: bigint | null; annulations: bigint;
+      }>>`
+        SELECT "magasinId" AS magasin_id,
+               COUNT(*) FILTER (WHERE "statut" = 'VALIDE')                AS tickets,
+               SUM("totalTtcCentimes") FILTER (WHERE "statut" = 'VALIDE') AS ca,
+               SUM("totalHtCentimes")  FILTER (WHERE "statut" = 'VALIDE') AS ca_ht,
+               SUM("margeCentimes")    FILTER (WHERE "statut" = 'VALIDE') AS marge,
+               COUNT(*) FILTER (WHERE "statut" = 'ANNULE')                AS annulations
+          FROM "DocumentVente"
+         WHERE "magasinId" = ANY(${magasinIds}::text[])
+           AND "dateVente" >= ${debut} AND "dateVente" < ${fin}
+         GROUP BY 1`,
+
+      // Stock vendable : le transit est exclu, il est compte a part.
+      this.prisma.$queryRaw<Array<{
+        magasin_id: string; references: bigint; valeur: bigint | null;
+      }>>`
+        SELECT e."magasinId" AS magasin_id,
+               COUNT(DISTINCT s."articleId")                              AS references,
+               SUM(s."quantiteMilli"::bigint * a."cumpCentimes" / 1000)   AS valeur
+          FROM "Stock" s
+          JOIN "Emplacement" e ON e."id" = s."emplacementId"
+          JOIN "Article" a     ON a."id" = s."articleId"
+         WHERE e."magasinId" = ANY(${magasinIds}::text[])
+           AND e."type" <> 'TRANSIT'
+           AND s."quantiteMilli" > 0
+         GROUP BY 1`,
+
+      this.prisma.$queryRaw<Array<{
+        magasin_id: string; references: bigint; valeur: bigint | null;
+      }>>`
+        SELECT e."magasinId" AS magasin_id,
+               COUNT(DISTINCT s."articleId")                              AS references,
+               SUM(s."quantiteMilli"::bigint * a."cumpCentimes" / 1000)   AS valeur
+          FROM "Stock" s
+          JOIN "Emplacement" e ON e."id" = s."emplacementId"
+          JOIN "Article" a     ON a."id" = s."articleId"
+         WHERE e."magasinId" = ANY(${magasinIds}::text[])
+           AND e."type" = 'TRANSIT'
+           AND s."quantiteMilli" <> 0
+         GROUP BY 1`,
+
+      this.prisma.$queryRaw<Array<{
+        magasin_id: string | null; solde: bigint | null; comptes: bigint;
+      }>>`
+        SELECT "magasinId" AS magasin_id,
+               SUM("soldeCentimes") AS solde,
+               COUNT(*)             AS comptes
+          FROM "CompteTresorerie"
+         WHERE "actif" = true
+           AND ("magasinId" = ANY(${magasinIds}::text[]) OR "magasinId" IS NULL)
+         GROUP BY 1`,
+
+      this.prisma.$queryRaw<Array<{ magasin_id: string; ruptures: bigint }>>`
+        SELECT e."magasinId" AS magasin_id, COUNT(*) AS ruptures
+          FROM "Stock" s
+          JOIN "Emplacement" e ON e."id" = s."emplacementId"
+          JOIN "Article" a     ON a."id" = s."articleId"
+         WHERE e."magasinId" = ANY(${magasinIds}::text[])
+           AND e."type" <> 'TRANSIT'
+           AND a."archive" = false AND a."venteAutorisee" = true
+           AND s."quantiteMilli" <= 0
+         GROUP BY 1`,
+    ]);
+
+    const parMagasinId = <T extends { magasin_id: string | null }>(lignes: T[]) =>
+      new Map(lignes.filter((l) => l.magasin_id !== null).map((l) => [l.magasin_id!, l]));
+
+    const vente = parMagasinId(ventes);
+    const stock = parMagasinId(stocks);
+    const enTransit = parMagasinId(transit);
+    const caisse = parMagasinId(tresorerie);
+    const rupture = parMagasinId(ruptures);
+
+    const lignes = magasins.map((m) => {
+      const v = vente.get(m.id);
+      const tickets = Number(v?.tickets ?? 0);
+      const caTtc = c(v?.ca);
+      return {
+        magasinId: m.id,
+        code: m.code,
+        nom: m.nom,
+        actif: m.actif,
+        nombreTickets: tickets,
+        nombreAnnulations: Number(v?.annulations ?? 0),
+        chiffreAffairesTtcCentimes: caTtc,
+        chiffreAffairesHtCentimes: c(v?.ca_ht),
+        margeCentimes: c(v?.marge),
+        panierMoyenCentimes: tickets > 0 ? Math.round(caTtc / tickets) : 0,
+        nombreReferencesEnStock: Number(stock.get(m.id)?.references ?? 0),
+        valeurStockCentimes: c(stock.get(m.id)?.valeur),
+        valeurEnTransitCentimes: c(enTransit.get(m.id)?.valeur),
+        tresorerieCentimes: c(caisse.get(m.id)?.solde),
+        nombreRuptures: Number(rupture.get(m.id)?.ruptures ?? 0),
+      };
+    });
+
+    // Les comptes du siege n'appartiennent a aucun magasin : ils comptent
+    // dans le total du groupe mais ne doivent etre imputes a personne.
+    const siege = tresorerie.find((t) => t.magasin_id === null);
+
+    const somme = (champ: keyof (typeof lignes)[number]) =>
+      lignes.reduce((t, l) => t + Number(l[champ] ?? 0), 0);
+
+    const caGroupe = somme('chiffreAffairesTtcCentimes');
+    const ticketsGroupe = somme('nombreTickets');
+
+    return {
+      periode: { debut, fin },
+      magasins: lignes,
+      siege: siege
+        ? { tresorerieCentimes: c(siege.solde), nombreComptes: Number(siege.comptes) }
+        : null,
+      groupe: {
+        nombreMagasins: lignes.length,
+        nombreTickets: ticketsGroupe,
+        nombreAnnulations: somme('nombreAnnulations'),
+        chiffreAffairesTtcCentimes: caGroupe,
+        chiffreAffairesHtCentimes: somme('chiffreAffairesHtCentimes'),
+        margeCentimes: somme('margeCentimes'),
+        panierMoyenCentimes: ticketsGroupe > 0 ? Math.round(caGroupe / ticketsGroupe) : 0,
+        valeurStockCentimes: somme('valeurStockCentimes'),
+        valeurEnTransitCentimes: somme('valeurEnTransitCentimes'),
+        tresorerieCentimes: somme('tresorerieCentimes') + c(siege?.solde),
+        nombreRuptures: somme('nombreRuptures'),
+      },
     };
   }
 }

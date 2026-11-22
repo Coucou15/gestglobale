@@ -35,6 +35,7 @@ export function synthesePeriode(donnees: {
   parCaisse: Array<Record<string, unknown>>;
   parCaissier: Array<Record<string, unknown>>;
   parFamille: Array<Record<string, unknown>>;
+  parMagasin: Array<Record<string, unknown>>;
   parModePaiement: Array<Record<string, unknown>>;
 }): Rapport {
   const tauxMarge = donnees.chiffreAffairesHtCentimes > 0
@@ -88,6 +89,17 @@ export function synthesePeriode(donnees: {
           { cle: 'margeCentimes', titre: 'Marge', sorte: 'montant', largeur: 16 },
         ],
         lignes: donnees.parCaisse,
+      },
+      {
+        titre: 'Par magasin',
+        colonnes: [
+          { cle: 'code', titre: 'Code', largeur: 8 },
+          { cle: 'nom', titre: 'Magasin', largeur: 26 },
+          { cle: 'nombreTickets', titre: 'Tickets', sorte: 'nombre', largeur: 10 },
+          { cle: 'chiffreAffairesCentimes', titre: 'CA TTC', sorte: 'montant', largeur: 16 },
+          { cle: 'margeCentimes', titre: 'Marge', sorte: 'montant', largeur: 16 },
+        ],
+        lignes: donnees.parMagasin,
       },
       {
         titre: 'Par caissier',
@@ -417,5 +429,101 @@ export function annulationsEtRemises(donnees: {
       + 'l’argent sort sans marchandise. La colonne « Autorisee par » nomme le '
       + 'responsable qui a leve le plafond du caissier ; vide, la remise etait dans '
       + 'son plafond.',
+  };
+}
+
+export function consolidation(donnees: {
+  periode: { debut: Date; fin: Date };
+  magasins: Array<Record<string, unknown>>;
+  siege: { tresorerieCentimes: number; nombreComptes: number } | null;
+  groupe: Record<string, number>;
+}): Rapport {
+  const g = donnees.groupe;
+  return {
+    titre: 'Consolidation du groupe',
+    sousTitre: periodeEnTexte(donnees.periode),
+    enTete: [
+      { intitule: 'Magasins', valeur: String(g.nombreMagasins) },
+      { intitule: 'Chiffre d’affaires TTC', valeur: DA(g.chiffreAffairesTtcCentimes) },
+      { intitule: 'Marge', valeur: DA(g.margeCentimes) },
+      { intitule: 'Panier moyen', valeur: DA(g.panierMoyenCentimes) },
+      { intitule: 'Valeur du stock', valeur: DA(g.valeurStockCentimes) },
+      { intitule: 'Dont en transit', valeur: DA(g.valeurEnTransitCentimes) },
+      { intitule: 'Tresorerie', valeur: DA(g.tresorerieCentimes) },
+      { intitule: 'Ruptures', valeur: String(g.nombreRuptures) },
+    ],
+    blocs: [{
+      titre: 'Magasin par magasin',
+      colonnes: [
+        { cle: 'code', titre: 'Code', largeur: 7 },
+        { cle: 'nom', titre: 'Magasin', largeur: 22 },
+        { cle: 'nombreTickets', titre: 'Tickets', sorte: 'nombre', largeur: 9 },
+        { cle: 'chiffreAffairesTtcCentimes', titre: 'CA TTC', sorte: 'montant', largeur: 15 },
+        { cle: 'margeCentimes', titre: 'Marge', sorte: 'montant', largeur: 14 },
+        { cle: 'panierMoyenCentimes', titre: 'Panier moyen', sorte: 'montant', largeur: 14 },
+        { cle: 'valeurStockCentimes', titre: 'Stock', sorte: 'montant', largeur: 15 },
+        { cle: 'valeurEnTransitCentimes', titre: 'En transit', sorte: 'montant', largeur: 13 },
+        { cle: 'tresorerieCentimes', titre: 'Tresorerie', sorte: 'montant', largeur: 14 },
+        { cle: 'nombreRuptures', titre: 'Ruptures', sorte: 'nombre', largeur: 10 },
+      ],
+      lignes: donnees.magasins,
+      total: {
+        code: 'Groupe',
+        nombreTickets: g.nombreTickets,
+        chiffreAffairesTtcCentimes: g.chiffreAffairesTtcCentimes,
+        margeCentimes: g.margeCentimes,
+        panierMoyenCentimes: g.panierMoyenCentimes,
+        valeurStockCentimes: g.valeurStockCentimes,
+        valeurEnTransitCentimes: g.valeurEnTransitCentimes,
+        tresorerieCentimes: g.tresorerieCentimes,
+        nombreRuptures: g.nombreRuptures,
+      },
+      siVide: 'Aucun magasin dans votre perimetre.',
+    }],
+    note:
+      'La tresorerie du groupe comprend les comptes du siege, qui n’appartiennent a '
+      + 'aucun magasin'
+      + (donnees.siege ? ` (${DA(donnees.siege.tresorerieCentimes)})` : '')
+      + '. La colonne « En transit » est de la marchandise partie d’un magasin et pas '
+      + 'encore recue dans l’autre : elle appartient encore a l’expediteur, mais '
+      + 'elle n’est dans aucun rayon et ne peut pas etre vendue.',
+  };
+}
+
+export function transfertsEnTransit(lignes: Array<Record<string, unknown>>): Rapport {
+  const valeur = lignes.reduce(
+    (t, l) => t + Number(l.valeurExpedieeCentimes ?? 0), 0,
+  );
+  return {
+    titre: 'Marchandise en transit',
+    sousTitre: 'Bons expedies et pas encore receptionnes',
+    enTete: [
+      { intitule: 'Transferts en cours', valeur: String(lignes.length) },
+      { intitule: 'Valeur sur la route', valeur: DA(valeur) },
+    ],
+    blocs: [{
+      colonnes: [
+        { cle: 'numero', titre: 'Bon', largeur: 16 },
+        { cle: 'expedieLe', titre: 'Expedie le', sorte: 'date', largeur: 13 },
+        { cle: 'joursEnTransit', titre: 'Jours', sorte: 'nombre', largeur: 8 },
+        { cle: 'sourceNom', titre: 'De', largeur: 22 },
+        { cle: 'destinationNom', titre: 'Vers', largeur: 22 },
+        { cle: 'nombreLignes', titre: 'Lignes', sorte: 'nombre', largeur: 9 },
+        { cle: 'valeurExpedieeCentimes', titre: 'Valeur', sorte: 'montant', largeur: 16 },
+      ],
+      lignes: lignes.map((l: any) => ({
+        ...l,
+        sourceNom: l.magasinSource?.nom ?? '',
+        destinationNom: l.magasinDestination?.nom ?? '',
+        nombreLignes: l.lignes?.length ?? 0,
+      })),
+      total: { numero: 'Total', valeurExpedieeCentimes: valeur },
+      siVide: 'Rien sur la route : tous les bons expedies ont ete receptionnes.',
+    }],
+    note:
+      'Un bon expedie depuis plusieurs jours et jamais receptionne merite un appel : '
+      + 'soit la marchandise n’est pas arrivee, soit personne n’a signe le bon de '
+      + 'reception. Dans les deux cas, le stock des deux magasins est faux tant que ce '
+      + 'n’est pas regle.',
   };
 }

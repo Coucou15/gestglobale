@@ -60,6 +60,40 @@ async function main(): Promise<void> {
     },
   });
 
+  // --- Second magasin (M11) --------------------------------------------
+  // Le client exploite une chaine : sans deuxieme superette, ni les
+  // transferts inter-magasins ni la consolidation ne veulent dire quoi
+  // que ce soit. Celle-ci sert a les eprouver.
+  const magasinBab = await prisma.magasin.create({
+    data: {
+      societeId: societe.id,
+      code: 'BE',
+      nom: 'Superette Bab Ezzouar',
+      estSiege: false,
+      adresse: 'Bab Ezzouar, Alger',
+    },
+  });
+
+  const depotBab = await prisma.emplacement.create({
+    data: {
+      magasinId: magasinBab.id,
+      code: 'MC',
+      nom: 'Depot',
+      type: TypeEmplacement.DEPOT,
+      parDefautReception: true,
+    },
+  });
+
+  const surfaceBab = await prisma.emplacement.create({
+    data: {
+      magasinId: magasinBab.id,
+      code: 'SV',
+      nom: 'Surface de vente',
+      type: TypeEmplacement.SURFACE_VENTE,
+      parDefautVente: true,
+    },
+  });
+
   // --- Rayons et familles ---------------------------------------------
   const rayonEpicerie = await prisma.rayon.create({
     data: { code: 'EPI', nom: 'Epicerie', nomAr: 'بقالة', ordre: 1 },
@@ -109,7 +143,12 @@ async function main(): Promise<void> {
         motDePasseHash: empreinteMdp,
         pinHash: empreintePin,
         importeDepuis: 'ancien logiciel',
-        magasins: { create: { magasinId: magasin.id } },
+        magasins: {
+          create: compte.login === 'gerant'
+            // Le gerant du groupe consolide : il lui faut les deux.
+            ? [{ magasinId: magasin.id }, { magasinId: magasinBab.id }]
+            : [{ magasinId: magasin.id }],
+        },
       },
     });
   }
@@ -131,7 +170,21 @@ async function main(): Promise<void> {
       { code: 'TIR-3', libelle: 'Tiroir caisse 3', type: TypeCompte.TIROIR, magasinId: magasin.id, caisseId: caisse3.id },
       { code: 'COF', libelle: 'Coffre', type: TypeCompte.COFFRE, magasinId: magasin.id },
       { code: 'BNQ', libelle: 'Banque', type: TypeCompte.BANQUE, magasinId: magasin.id, banque: 'BNA' },
+      { code: 'COF-BE', libelle: 'Coffre Bab Ezzouar', type: TypeCompte.COFFRE, magasinId: magasinBab.id },
+      // Compte du siege : il n'appartient a aucun magasin et ne doit
+      // donc etre impute a aucun dans la consolidation.
+      { code: 'BNQ-SIEGE', libelle: 'Banque du siege', type: TypeCompte.BANQUE, banque: 'BEA' },
     ],
+  });
+
+  const caisseBab = await prisma.caisse.create({
+    data: { magasinId: magasinBab.id, numero: 1, libelle: 'Caisse 1' },
+  });
+  await prisma.compteTresorerie.create({
+    data: {
+      code: 'TIR-BE-1', libelle: 'Tiroir Bab Ezzouar', type: TypeCompte.TIROIR,
+      magasinId: magasinBab.id, caisseId: caisseBab.id,
+    },
   });
 
   // --- Parametres ------------------------------------------------------
@@ -439,9 +492,10 @@ async function main(): Promise<void> {
   console.log(`
 Jeu de donnees cree.
 
-  Magasin        : ${magasin.code} — ${magasin.nom}
+  Magasins       : ${magasin.code} — ${magasin.nom} (siege)
+                   ${magasinBab.code} — ${magasinBab.nom}
   Emplacements   : ${depot.code} (depot), ${surfaceVente.code} (surface de vente)
-  Caisses        : 2 et 3
+  Caisses        : 2 et 3 a ${magasin.code}, 1 a ${magasinBab.code}
   Utilisateurs   : ${comptes.length} (codes 1 a 11)
   Articles       : ${articles.length} + 1 pack
   Promotions     : 4 (prix barre, X pour Y, remise famille, happy hour)
@@ -454,6 +508,8 @@ Jeu de donnees cree.
   A l'installation chez le client, changez-les avant la mise en service.
 `);
   void gerant;
+  void depotBab;
+  void surfaceBab;
 }
 
 main()

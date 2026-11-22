@@ -19,6 +19,7 @@ import { RapportsModule } from './rapports/rapports.module';
 import { ReferentielModule } from './referentiel/referentiel.module';
 import { PromotionsModule } from './promotions/promotions.module';
 import { FideliteModule } from './fidelite/fidelite.module';
+import { TransfertsModule } from './transferts/transferts.module';
 import { DroitsGuard } from './auth/droits.guard';
 
 @Module({
@@ -38,6 +39,7 @@ import { DroitsGuard } from './auth/droits.guard';
     SyncModule,
     ImportModule,
     RapportsModule,
+    TransfertsModule,
     ReferentielModule,
     PromotionsModule,
     FideliteModule,

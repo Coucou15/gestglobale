@@ -338,6 +338,17 @@ async function main() {
     appel('/rapports/annulations-et-remises', gerant.jeton));
   verifierUnique('Journal des annulations et remises du mois', dureeJournal, 5000);
 
+  // Consolidation (M11) : elle balaye les ventes, tout le stock et la
+  // tresorerie de chaque magasin. C'est la requete la plus large du
+  // produit.
+  const { duree: dureeConsolidation } = await chrono(() =>
+    appel('/rapports/consolidation', gerant.jeton));
+  verifierUnique('Consolidation du groupe', dureeConsolidation, 5000);
+
+  const { duree: dureeTransit } = await chrono(() =>
+    appel('/transferts/en-transit', gerant.jeton));
+  verifierUnique('Marchandise en transit', dureeTransit, 5000);
+
   // ----------------------------------------------------------------
   titre('7 bis. Exports Excel et PDF au volume reel');
 
@@ -348,6 +359,7 @@ async function main() {
     ['periode', 'Synthese du mois'],
     ['ruptures', 'Ruptures'],
     ['produits', 'Palmares'],
+    ['consolidation', 'Consolidation du groupe'],
   ]) {
     for (const format of ['xlsx', 'pdf']) {
       const { duree, resultat } = await chrono(async () => {

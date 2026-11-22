@@ -72,6 +72,8 @@ model Magasin {
   receptions          Reception[]
   plannings           Planning[]
   resumesQuotidiens   ResumeQuotidien[]
+  transfertsEnvoyes   TransfertStock[] @relation("TransfertSource")
+  transfertsRecus     TransfertStock[] @relation("TransfertDestination")
 
   @@index([societeId])
 }
@@ -80,6 +82,10 @@ enum TypeEmplacement {
   DEPOT           // MC dans l'ancien logiciel
   SURFACE_VENTE   // SV dans l'ancien logiciel
   RESERVE
+  /// Marchandise partie d'un magasin et pas encore recue dans l'autre.
+  /// Elle appartient au magasin expediteur jusqu'a la signature du bon
+  /// de reception : c'est son stock, meme s'il est sur la route.
+  TRANSIT
 }
 
 /// Lieu physique ou le stock est compte. L'ancien logiciel n'en connaissait
@@ -104,6 +110,8 @@ model Emplacement {
   inventaires      Inventaire[]
   lots             Lot[]
   receptions       Reception[]
+  transfertsDepart  TransfertStock[] @relation("TransfertEmplacementSource")
+  transfertsArrivee TransfertStock[] @relation("TransfertEmplacementDestination")
 
   @@unique([magasinId, code])
   @@index([magasinId])
@@ -233,6 +241,7 @@ model Article {
   lignesCommande    LigneCommande[]
   lignesReception   LigneReception[]
   lignesVente       LigneVente[]
+  lignesTransfert   LigneTransfertStock[]
   promotions        Promotion[]
 
   @@index([familleId])
@@ -369,6 +378,9 @@ enum TypeMouvement {
   CONSOMMATION_INTERNE
   AJUSTEMENT_INVENTAIRE
   SOLDE_INITIAL
+  /// Difference entre ce qui a ete expedie et ce qui a ete recu. Elle
+  /// reste au magasin expediteur, qui a laisse partir la marchandise.
+  TRANSFERT_ECART
 }
 
 /// Journal des mouvements : jamais modifie, jamais supprime.
@@ -1127,6 +1139,84 @@ model TransfertTresorerie {
   @@index([statut])
 }
 
+enum StatutTransfertStock {
+  /// Bon en preparation : modifiable, rien n'a bouge.
+  PREPARE
+  /// Marchandise partie. Elle a quitte le stock du magasin expediteur
+  /// pour son emplacement de transit.
+  EXPEDIE
+  /// Bon de reception signe. Le transit est solde, les ecarts consignes.
+  RECU
+  ANNULE
+}
+
+/// Transfert inter-magasins (M11).
+///
+/// En deux temps, parce que la marchandise met du temps a arriver :
+/// un bon d'expedition au depart, un bon de reception a l'arrivee. Entre
+/// les deux elle est en transit — dans aucun rayon, mais toujours dans
+/// les comptes du magasin expediteur.
+///
+/// Les traiter en un seul geste ferait apparaitre a 8 h, dans le magasin
+/// d'arrivee, une palette encore sur le camion.
+model TransfertStock {
+  id              String               @id @default(uuid())
+  /// Numero du bon d'expedition, attribue au depart.
+  numero          String               @unique
+  /// Numero du bon de reception, attribue a l'arrivee.
+  numeroReception String?              @unique
+  magasinSourceId String
+  magasinDestinationId String
+  emplacementSourceId      String
+  emplacementDestinationId String
+  statut          StatutTransfertStock @default(PREPARE)
+  motif           String?
+  /// Vrai des qu'une ligne recue differe de la ligne expediee.
+  avecEcart       Boolean              @default(false)
+  creeParId       String
+  expedieParId    String?
+  recuParId       String?
+  creeLe          DateTime             @default(now())
+  expedieLe       DateTime?
+  recuLe          DateTime?
+  commentaireReception String?
+  modifieLe       DateTime             @updatedAt
+
+  magasinSource        Magasin     @relation("TransfertSource", fields: [magasinSourceId], references: [id])
+  magasinDestination   Magasin     @relation("TransfertDestination", fields: [magasinDestinationId], references: [id])
+  emplacementSource      Emplacement @relation("TransfertEmplacementSource", fields: [emplacementSourceId], references: [id])
+  emplacementDestination Emplacement @relation("TransfertEmplacementDestination", fields: [emplacementDestinationId], references: [id])
+  creePar     Utilisateur  @relation("TransfertCree", fields: [creeParId], references: [id])
+  expediePar  Utilisateur? @relation("TransfertExpedie", fields: [expedieParId], references: [id])
+  recuPar     Utilisateur? @relation("TransfertRecu", fields: [recuParId], references: [id])
+  lignes      LigneTransfertStock[]
+
+  @@index([statut])
+  @@index([magasinSourceId, statut])
+  @@index([magasinDestinationId, statut])
+}
+
+model LigneTransfertStock {
+  id           String @id @default(uuid())
+  transfertId  String
+  articleId    String
+  /// Quantite inscrite sur le bon d'expedition.
+  quantiteMilli Int
+  /// Quantite reellement comptee a l'arrivee. Nulle tant que le bon de
+  /// reception n'est pas signe.
+  quantiteRecueMilli Int?
+  /// CUMP du magasin expediteur au moment du depart : c'est a ce cout
+  /// que la marchandise entre chez le destinataire.
+  cumpCentimes BigInt @default(0)
+  motifEcart   String?
+
+  transfert TransfertStock @relation(fields: [transfertId], references: [id], onDelete: Cascade)
+  article   Article        @relation(fields: [articleId], references: [id])
+
+  @@unique([transfertId, articleId])
+  @@index([articleId])
+}
+
 enum TypeMouvementCaisse {
   ENTREE_TIROIR
   SORTIE_TIROIR
@@ -1220,6 +1310,9 @@ model Utilisateur {
   cloturesValidees      ClotureZ[]
   ventes                DocumentVente[]      @relation("VenteUtilisateur")
   forcages              DocumentVente[]      @relation("VenteForcage")
+  transfertsCrees       TransfertStock[]     @relation("TransfertCree")
+  transfertsExpedies    TransfertStock[]     @relation("TransfertExpedie")
+  transfertsRecus       TransfertStock[]     @relation("TransfertRecu")
   lignesAutorisees      LigneVente[]
   operations            OperationTresorerie[]
   transfertsDemandes    TransfertTresorerie[] @relation("TransfertDemande")

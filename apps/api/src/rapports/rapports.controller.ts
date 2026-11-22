@@ -4,6 +4,7 @@ import type { Response } from 'express';
 import { ApiTags } from '@nestjs/swagger';
 import { RapportsService } from './rapports.service';
 import { ResumeService } from './resume.service';
+import { TransfertsService } from '../transferts/transferts.service';
 import { Droits, Utilisateur, type UtilisateurConnecte } from '../auth/droits.decorator';
 import { PERMISSIONS } from '@gestglobale/shared';
 import { nomDeFichier, type Rapport } from './tableau';
@@ -19,6 +20,9 @@ export class RapportsController {
   constructor(
     private readonly rapports: RapportsService,
     private readonly resume: ResumeService,
+    // La consolidation et le transit tiennent au meme rapport : la
+    // marchandise sur la route fait partie de ce que le groupe possede.
+    private readonly transferts: TransfertsService,
   ) {}
 
   private periode(debut?: string, fin?: string): { debut: Date; fin: Date } {
@@ -121,6 +125,20 @@ export class RapportsController {
     @Query('fin') fin?: string,
   ) {
     return this.rapports.annulationsEtRemises({
+      magasinIds: utilisateur.magasins,
+      ...this.periode(debut, fin),
+    });
+  }
+
+  /** Consolidation des ventes, stocks et tresorerie du groupe (M11). */
+  @Get('consolidation')
+  @Droits(PERMISSIONS.RAPPORT_SON_MAGASIN)
+  consolidation(
+    @Utilisateur() utilisateur: UtilisateurConnecte,
+    @Query('debut') debut?: string,
+    @Query('fin') fin?: string,
+  ) {
+    return this.rapports.consolidation({
       magasinIds: utilisateur.magasins,
       ...this.periode(debut, fin),
     });
@@ -244,6 +262,16 @@ export class RapportsController {
           jours, await this.rapports.dormants({ magasinIds, jours }),
         );
       }
+      case 'consolidation': {
+        const periode = this.periode(options.debut, options.fin);
+        return presentation.consolidation(
+          await this.rapports.consolidation({ magasinIds, ...periode }),
+        );
+      }
+      case 'en-transit':
+        return presentation.transfertsEnTransit(
+          await this.transferts.enTransit(magasinIds),
+        );
       case 'ruptures':
         return presentation.ruptures(
           await this.rapports.ruptures({
@@ -271,7 +299,8 @@ export class RapportsController {
       default:
         throw new BadRequestException(
           `Rapport « ${nom} » inconnu. Disponibles : periode, produits, dormants, `
-          + 'ruptures, ventes-a-perte, ecarts-de-caisse, annulations-et-remises',
+          + 'ruptures, ventes-a-perte, ecarts-de-caisse, annulations-et-remises, '
+          + 'consolidation, en-transit',
         );
     }
   }

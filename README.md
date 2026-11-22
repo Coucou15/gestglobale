@@ -17,7 +17,7 @@ a M8, l'assistant de migration et la caisse hors ligne.
 | Back-office web (React) | tableau de bord, articles, promotions, stocks, factures et bons de livraison, receptions, inventaires, caisses, tiers, tresorerie, historique repris, audit |
 | Assistant d'import | lit l'export Excel de l'ancien logiciel, le controle et le charge |
 
-**295 verifications automatisees** passent contre une vraie base, une API
+**333 verifications automatisees** passent contre une vraie base, une API
 reellement demarree et, pour la caisse, un vrai Electron : `pnpm recette`.
 
 Le parcours de saisie est verifie dans un vrai navigateur, de la
@@ -25,7 +25,8 @@ reception a l'inventaire jusqu'au cloisonnement des droits :
 `node apps/backoffice/test-navigateur.mjs`, API et back-office demarres.
 Les ecrans de documents, d'historique, de promotions et de fidelite ont
 chacun leur verification : `test-documents.mjs`, `test-historique.mjs`,
-`test-promotions.mjs`, `test-fidelite.mjs`, `test-rapports.mjs`.
+`test-promotions.mjs`, `test-fidelite.mjs`, `test-rapports.mjs`,
+`test-transferts.mjs`.
 
 Le resume quotidien du gerant demande un relais de messagerie, que le
 client doit fournir : voir [`docs/resume-quotidien.md`](docs/resume-quotidien.md).
@@ -280,7 +281,7 @@ le serveur et enchaine :
 |---|---|
 | Noyau metier (hors base, hors reseau) | 67 |
 | Nettoyage a l'import et documents de vente | 61 |
-| Recette fonctionnelle du lot 1, M9 et M10 | 106 |
+| Recette fonctionnelle du lot 1, M9, M10 et M11 | 144 |
 | Coupure reseau de la caisse | 20 |
 | Cartes cadeaux pendant une coupure | 8 |
 | La caisse de bout en bout sous Electron | 33 |
@@ -290,9 +291,9 @@ pnpm charge
 ```
 
 Ajoute le test de charge au volume reel : generation de 30 000 articles,
-journee de 430 tickets sur 2 caisses, 26 mesures de performance — dont
-les sept rapports et leurs exports Excel et PDF — et un essai de
-remontee simultanee. Comptez une dizaine de minutes.
+journee de 430 tickets sur 2 caisses, 30 mesures de performance — dont
+les rapports, la consolidation du groupe et leurs exports Excel et PDF —
+et un essai de remontee simultanee. Comptez une dizaine de minutes.
 
 Chaque suite part d'une base fraiche : la numerotation des documents est
 deterministe par caisse, donc rejouer une suite sur une base deja remplie
@@ -327,13 +328,13 @@ L'etat detaille, module par module, est dans
 [`docs/etat-du-projet.md`](docs/etat-du-projet.md).
 
 En resume : le lot 1 est complet et verifie, caisse empaquetee comprise,
-et deux modules du lot 2 sont livres — M9, les rapports du gerant avec
-leurs exports Excel et PDF et le resume quotidien, et M10, promotions,
-points de fidelite, cartes cadeaux et bons d'achat, tous appliques en
-caisse hors ligne comprise. Restent l'execution de l'installateur sur
-une vraie machine Windows, sa signature, le relais de messagerie pour
-l'envoi automatique, puis le reste des lots 2 et 3 (consolidation
-multi-magasins M11, comptabilite M12, personnel M13).
+et le lot 2 est livre — M9, les rapports du gerant avec leurs exports
+Excel et PDF et le resume quotidien ; M10, promotions, points de
+fidelite, cartes cadeaux et bons d'achat, tous appliques en caisse hors
+ligne comprise ; M11, transferts inter-magasins a deux temps et
+consolidation du groupe. Restent l'execution de l'installateur sur une
+vraie machine Windows, sa signature, le relais de messagerie pour
+l'envoi automatique, puis le lot 3 (comptabilite M12, personnel M13).
 
 Plusieurs points demandent une decision de votre part avant d'aller plus
 loin ; ils sont listes a la fin du meme document.

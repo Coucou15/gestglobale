@@ -3,6 +3,22 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!--
+      Politique de securite du contenu.
+
+      La caisse ne charge que ses propres fichiers : elle n'a aucune
+      raison d'executer du code venu d'ailleurs, ni d'ouvrir une
+      connexion que le processus principal n'a pas voulue. Sans cette
+      ligne, Electron avertit a chaque demarrage, et a raison : un poste
+      de caisse manipule de l'argent.
+
+      'unsafe-inline' sur les styles seulement : React pose des styles
+      en ligne, pas de script.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
     <title>Caisse GestGlobale</title>
   </head>
   <body>

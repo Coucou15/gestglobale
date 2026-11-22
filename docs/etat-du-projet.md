@@ -25,7 +25,7 @@ a venir = non commence.
 | M8 | Utilisateurs et droits | 1 | **fait** |
 | M9 | Tableaux de bord et rapports | 2 | **fait** — sept rapports, chacun exportable en Excel et en PDF, et resume quotidien du gerant ; reste a fournir un relais de messagerie pour l'envoi |
 | M10 | Fidelite et promotions | 2 | **fait** — promotions, points de fidelite, cartes cadeaux et bons d'achat, appliques en caisse hors ligne comprise |
-| M11 | Multi-magasins | 2 | *partiel* — catalogue central, prix par magasin et transferts faits ; consolidation a completer |
+| M11 | Multi-magasins | 2 | **fait** — catalogue central, prix par magasin, transferts inter-magasins a deux temps avec bon d'expedition et bon de reception, consolidation du groupe |
 | M12 | Comptabilite et exports | 3 | *partiel* — historique de l'ancien logiciel repris et consultable ; journaux et etats fiscaux a faire |
 | M13 | Gestion du personnel | 3 | *partiel* — modele de donnees complet ; fonctionnalites a faire |
 
@@ -127,6 +127,37 @@ qu'un rapport qui n'existe pas — c'est precisement ce que le client
 reprochait a son ancien logiciel, dont les chiffres n'arrivaient nulle
 part.
 
+**M11 — Multi-magasins.** Le catalogue et les prix sont definis au
+siege et declinables par magasin. Deux choses s'y ajoutent.
+
+**Les transferts inter-magasins se font en deux temps** : un bon
+d'expedition au depart, un bon de reception a l'arrivee. Entre les deux,
+la marchandise est **en transit** — dans aucun rayon, mais toujours dans
+les comptes du magasin expediteur, jusqu'a ce que quelqu'un signe pour
+elle.
+
+Ce n'est pas un detail de procedure. Traiter un transfert en un seul
+geste ferait apparaitre a 8 h, dans le magasin d'arrivee, une palette
+encore sur le camion — et ferait disparaitre la marchandise des deux
+magasins si le camion n'arrivait jamais.
+
+Ce qui arrive peut differer de ce qui est parti. L'ecran de reception
+demande donc un **comptage**, jamais une simple validation. L'ecart
+apparait des la saisie, un motif est demande, et il reste au compte du
+magasin expediteur — c'est lui qui a laisse partir la marchandise. Un
+bon expedie et jamais receptionne figure dans un rapport dedie, avec son
+anciennete : c'est de l'argent dont personne ne repond.
+
+Expedier plus qu'on ne possede est refuse, contrairement a une vente
+deja encaissee : rien n'a encore eu lieu, on peut donc dire non.
+
+**La consolidation** met les superettes cote a cote sur une page :
+ventes, marge, panier moyen, valeur du stock, marchandise en transit,
+tresorerie et ruptures, magasin par magasin puis additionnes. La
+tresorerie du siege y figure a part, parce qu'elle n'appartient a aucun
+magasin. La marchandise en transit a sa colonne : la confondre avec du
+stock vendable ferait croire a une disponibilite qui n'existe pas.
+
 **M10 — Promotions, fidelite, cartes cadeaux.** Quatre sortes de
 promotions (prix barre, X achetes Y offerts, remise par famille, happy
 hour avec plage horaire pouvant franchir minuit), declarees au
@@ -197,7 +228,8 @@ bon vient peut-etre d'etre emis.
 | Cloture Z avec comptage, ecart calcule et justifie | **verifie** |
 | Un caissier sans droit ne peut ni annuler, ni modifier un prix, ni voir les marges | **verifie** |
 | Consultation des ventes du jour depuis un smartphone hors du magasin | **verifie** en navigateur mobile ; reste a eprouver via le tunnel |
-| Rapport mensuel rendu en moins de 5 secondes | **verifie au volume reel** — 15 ms pour la synthese, 287 ms pour les ruptures sur 30 000 articles ; les exports Excel et PDF tiennent sous 250 ms |
+| Rapport mensuel rendu en moins de 5 secondes | **verifie au volume reel** — 27 ms pour la synthese, 159 ms pour les ruptures sur 30 000 articles, 176 ms pour la consolidation ; les exports Excel et PDF tiennent sous 210 ms |
+| Transfert inter-magasins : ce qui part, ce qui arrive et l'ecart sont traces separement | **verifie** — le groupe ne perd que la quantite reellement manquante |
 | Restauration complete depuis la sauvegarde de la veille en moins d'une heure | **a eprouver** a l'installation |
 
 ---

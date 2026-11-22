@@ -21,6 +21,11 @@ interface Onglet {
 
 const ONGLETS: Onglet[] = [
   {
+    cle: 'consolidation', libelle: 'Groupe', periodique: true,
+    droit: 'rapport.son_magasin',
+    aide: 'Ventes, stocks et tresorerie de toutes les superettes, cote a cote puis additionnes.',
+  },
+  {
     cle: 'periode', libelle: 'Synthese', periodique: true,
     droit: 'rapport.son_magasin',
     aide: 'Chiffre d’affaires, marge et panier moyen, par jour, heure, caisse, caissier et rayon.',
@@ -54,6 +59,11 @@ const ONGLETS: Onglet[] = [
     cle: 'dormants', libelle: 'Dormants', periodique: false,
     droit: 'rapport.stocks',
     aide: 'Stock qui ne tourne plus : de l’argent immobilise en rayon.',
+  },
+  {
+    cle: 'en-transit', libelle: 'En transit', periodique: false,
+    droit: 'stock.voir',
+    aide: 'Marchandise partie d’un magasin et pas encore recue dans l’autre.',
   },
   {
     cle: 'resumes', libelle: 'Resumes quotidiens', periodique: false,
@@ -115,7 +125,10 @@ export function Rapports({ utilisateur }: { utilisateur: Utilisateur }) {
     setErreur(null); setOccupe(true);
     const demande = onglet;
     try {
-      const donnees = await appeler<any>(`/rapports/${demande}?${parametres()}`);
+      const chemin = demande === 'en-transit'
+        ? '/transferts/en-transit'
+        : `/rapports/${demande}?${parametres()}`;
+      const donnees = await appeler<any>(chemin);
       setResultat({ onglet: demande, donnees });
     } catch (e) {
       setResultat(null);
@@ -345,6 +358,94 @@ function Contenu({ onglet, donnees }: { onglet: string; donnees: any }) {
             { titre: 'Mode', rendu: (l) => l.mode },
             { titre: 'Montant', rendu: (l) => DA(l.montantCentimes), nombre: true },
           ]} />
+        </>
+      );
+    }
+
+    case 'consolidation': {
+      const g = donnees.groupe;
+      return (
+        <>
+          <Chiffres cases={[
+            { intitule: 'Magasins', valeur: String(g.nombreMagasins) },
+            { intitule: 'CA TTC du groupe', valeur: DA(g.chiffreAffairesTtcCentimes) },
+            { intitule: 'Marge', valeur: DA(g.margeCentimes) },
+            { intitule: 'Panier moyen', valeur: DA(g.panierMoyenCentimes) },
+            { intitule: 'Valeur du stock', valeur: DA(g.valeurStockCentimes) },
+            { intitule: 'Dont en transit', valeur: DA(g.valeurEnTransitCentimes) },
+            { intitule: 'Tresorerie', valeur: DA(g.tresorerieCentimes) },
+            { intitule: 'Ruptures', valeur: String(g.nombreRuptures) },
+          ]} />
+          <Tableau titre="Magasin par magasin" lignes={donnees.magasins}
+            vide="Aucun magasin dans votre perimetre." colonnes={[
+              { titre: 'Code', rendu: (l) => l.code },
+              { titre: 'Magasin', rendu: (l) => l.nom },
+              { titre: 'Tickets', rendu: (l) => l.nombreTickets, nombre: true },
+              { titre: 'CA TTC', rendu: (l) => DA(l.chiffreAffairesTtcCentimes), nombre: true },
+              { titre: 'Marge', rendu: (l) => DA(l.margeCentimes), nombre: true },
+              { titre: 'Panier moyen', rendu: (l) => DA(l.panierMoyenCentimes), nombre: true },
+              { titre: 'Stock', rendu: (l) => DA(l.valeurStockCentimes), nombre: true },
+              {
+                titre: 'En transit',
+                rendu: (l) => (l.valeurEnTransitCentimes > 0
+                  ? <span className="etiquette orange">{DA(l.valeurEnTransitCentimes)}</span>
+                  : '—'),
+                nombre: true,
+              },
+              { titre: 'Tresorerie', rendu: (l) => DA(l.tresorerieCentimes), nombre: true },
+              {
+                titre: 'Ruptures',
+                rendu: (l) => (l.nombreRuptures > 0
+                  ? <span className="etiquette rouge">{l.nombreRuptures}</span>
+                  : '—'),
+                nombre: true,
+              },
+            ]} />
+          <p className="discret">
+            La tresorerie du groupe comprend les comptes du siege, qui n’appartiennent a
+            aucun magasin
+            {donnees.siege ? ` (${DA(donnees.siege.tresorerieCentimes)})` : ''}.
+            La colonne « En transit » est de la marchandise partie d’un magasin et pas
+            encore recue dans l’autre : elle appartient encore a l’expediteur, mais elle
+            n’est dans aucun rayon et ne peut pas etre vendue.
+          </p>
+        </>
+      );
+    }
+
+    case 'en-transit': {
+      const valeur = donnees.reduce(
+        (t: number, l: any) => t + Number(l.valeurExpedieeCentimes), 0,
+      );
+      return (
+        <>
+          <Chiffres cases={[
+            { intitule: 'Transferts en cours', valeur: String(donnees.length) },
+            { intitule: 'Valeur sur la route', valeur: DA(valeur) },
+          ]} />
+          <Tableau lignes={donnees}
+            vide="Rien sur la route : tous les bons expedies ont ete receptionnes."
+            colonnes={[
+              { titre: 'Bon', rendu: (l) => l.numero },
+              { titre: 'Expedie le', rendu: (l) => JOUR(l.expedieLe) },
+              {
+                titre: 'Jours',
+                rendu: (l) => (l.joursEnTransit >= 3
+                  ? <span className="etiquette orange">{l.joursEnTransit}</span>
+                  : l.joursEnTransit),
+                nombre: true,
+              },
+              { titre: 'De', rendu: (l) => l.magasinSource?.nom },
+              { titre: 'Vers', rendu: (l) => l.magasinDestination?.nom },
+              { titre: 'Lignes', rendu: (l) => l.lignes?.length ?? 0, nombre: true },
+              { titre: 'Valeur', rendu: (l) => DA(l.valeurExpedieeCentimes), nombre: true },
+            ]} />
+          <p className="discret">
+            Un bon expedie depuis plusieurs jours et jamais receptionne merite un appel :
+            soit la marchandise n’est pas arrivee, soit personne n’a signe le bon de
+            reception. Dans les deux cas, le stock des deux magasins est faux tant que ce
+            n’est pas regle.
+          </p>
         </>
       );
     }
