@@ -1549,6 +1549,10 @@ model Contrat {
   debut               DateTime
   fin                 DateTime?
   salaireBaseCentimes BigInt
+  /// Heures hebdomadaires prevues au contrat. Sans elles, un temps
+  /// partiel accumulerait des heures supplementaires fictives des qu'il
+  /// depasse le mi-temps, alors qu'il reste sous l'horaire legal.
+  heuresParSemaine    Int         @default(40)
   primesFixes         Json        @default("[]")
   /// Alerte 30 jours avant la fin d'un CDD ou d'une periode d'essai (M13).
   alerteEnvoyeeLe     DateTime?

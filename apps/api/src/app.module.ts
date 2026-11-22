@@ -21,6 +21,7 @@ import { PromotionsModule } from './promotions/promotions.module';
 import { FideliteModule } from './fidelite/fidelite.module';
 import { TransfertsModule } from './transferts/transferts.module';
 import { ComptabiliteModule } from './comptabilite/comptabilite.module';
+import { PersonnelModule } from './personnel/personnel.module';
 import { DroitsGuard } from './auth/droits.guard';
 
 @Module({
@@ -42,6 +43,7 @@ import { DroitsGuard } from './auth/droits.guard';
     RapportsModule,
     TransfertsModule,
     ComptabiliteModule,
+    PersonnelModule,
     ReferentielModule,
     PromotionsModule,
     FideliteModule,

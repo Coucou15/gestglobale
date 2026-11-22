@@ -1132,7 +1132,317 @@ async function main() {
       && String(journalInconnu.donnees?.message ?? '').includes('journal-tresorerie'),
     String(journalInconnu.donnees?.message ?? '').slice(0, 60));
 
-  titre('18. Journal d\'audit');
+  titre('18. Personnel : dossiers, pointage, conges (M13)');
+
+  const employes = await appel('/personnel/employes', { jeton: jetonGerant });
+  verifier('Les dossiers du personnel sont lisibles',
+    (employes.donnees ?? []).length === 4,
+    (employes.donnees ?? []).map((e) => e.matricule).join(', '));
+
+  const karim = (employes.donnees ?? []).find((e) => e.matricule === 'E0001');
+  verifier('Chaque dossier porte son contrat actif',
+    karim?.contrats?.length === 1 && karim.contrats[0].salaireBaseCentimes === 4000000);
+  verifier('Le compte de caisse est rattache au dossier',
+    karim?.utilisateur?.code === '3', JSON.stringify(karim?.utilisateur));
+
+  const alertesContrats = await appel('/personnel/alertes-contrats', { jeton: jetonGerant });
+  verifier('Les contrats a terme proche sont signales, les plus urgents d\'abord',
+    (alertesContrats.donnees ?? []).length === 2
+      && alertesContrats.donnees[0].type === 'ESSAI',
+    (alertesContrats.donnees ?? []).map((a) => `${a.type} dans ${a.joursRestants} j`).join(', '));
+
+  const contratSansTerme = await appel(`/personnel/employes/${karim.id}/contrats`, {
+    methode: 'POST', jeton: jetonGerant,
+    corps: { type: 'CDD', debut: new Date().toISOString(), salaireBaseCentimes: 4000000 },
+  });
+  verifier('Un CDD sans date de fin est refuse',
+    contratSansTerme.statut === 400,
+    String(contratSansTerme.donnees?.message ?? '').slice(0, 60));
+
+  // Pointage.
+  const veille = new Date(Date.now() - 86400000);
+  const a8h = new Date(veille); a8h.setHours(8, 0, 0, 0);
+  const a17h30 = new Date(veille); a17h30.setHours(17, 30, 0, 0);
+
+  const entree = await appel('/personnel/pointages', {
+    methode: 'POST', jeton: jetonGerant,
+    corps: {
+      employeId: karim.id, sens: 'ENTREE',
+      instant: a8h.toISOString(), source: 'CAISSE-3',
+    },
+  });
+  verifier('Une entree se pointe', entree.donnees?.entree !== null,
+    entree.donnees?.reference ?? JSON.stringify(entree.donnees)?.slice(0, 80));
+
+  const repointage = await appel('/personnel/pointages', {
+    methode: 'POST', jeton: jetonGerant,
+    corps: {
+      employeId: karim.id, sens: 'ENTREE',
+      instant: new Date(a8h.getTime() + 3600000).toISOString(),
+    },
+  });
+  verifier('Repointer l\'entree ne reecrit pas l\'heure d\'arrivee',
+    new Date(repointage.donnees.entree).getTime() === a8h.getTime(),
+    'une remontee hors ligne rejouee ne refait pas l\'histoire');
+
+  const sortieSansEntree = await appel('/personnel/pointages', {
+    methode: 'POST', jeton: jetonGerant,
+    corps: {
+      employeId: (employes.donnees ?? []).find((e) => e.matricule === 'E0004').id,
+      sens: 'SORTIE',
+    },
+  });
+  verifier('On ne sort pas sans etre entre', sortieSansEntree.statut === 400,
+    String(sortieSansEntree.donnees?.message ?? '').slice(0, 55));
+
+  const sortiePointee = await appel('/personnel/pointages', {
+    methode: 'POST', jeton: jetonGerant,
+    corps: { employeId: karim.id, sens: 'SORTIE', instant: a17h30.toISOString() },
+  });
+  verifier('La sortie calcule les heures travaillees',
+    sortiePointee.donnees?.heuresTravaillees === 9.5,
+    `${sortiePointee.donnees?.heuresTravaillees} h`);
+
+  // Conges.
+  const demandeConge = await appel('/personnel/absences', {
+    methode: 'POST', jeton: jetonGerant,
+    corps: {
+      employeId: karim.id, type: 'CONGE_ANNUEL',
+      debut: new Date(Date.now() + 10 * 86400000).toISOString(),
+      fin: new Date(Date.now() + 14 * 86400000).toISOString(),
+    },
+  });
+  verifier('Une demande de conge compte ses jours bornes comprises',
+    demandeConge.donnees?.nombreJours === 5, `${demandeConge.donnees?.nombreJours} jours`);
+
+  const validationConge = await appel(
+    `/personnel/absences/${demandeConge.donnees.id}/validation`,
+    { methode: 'POST', jeton: jetonGerant, corps: { accepte: true } },
+  );
+  verifier('La validation decompte le solde de conges',
+    validationConge.donnees?.soldeCongesApres === 25,
+    `30 -> ${validationConge.donnees?.soldeCongesApres}`);
+
+  const revalidation = await appel(
+    `/personnel/absences/${demandeConge.donnees.id}/validation`,
+    { methode: 'POST', jeton: jetonGerant, corps: { accepte: true } },
+  );
+  verifier('Une demande deja validee ne se revalide pas', revalidation.statut === 400);
+
+  titre('19. Paie et confidentialite (M13)');
+
+  // Le coffre doit etre approvisionne avant de payer une avance.
+  const situation = await appel('/tresorerie/situation', { jeton: jetonGerant });
+  const coffre = (situation.donnees?.comptes ?? []).find((c) => c.code === 'COF');
+  await appel('/tresorerie/operations', {
+    methode: 'POST', jeton: jetonGerant,
+    corps: {
+      compteId: coffre.id, sens: 'ENTREE', categorie: 'APPORT_GERANT',
+      montantCentimes: 5000000, libelle: 'Fonds de roulement',
+    },
+  });
+  const coffreAvant = (await appel('/tresorerie/situation', { jeton: jetonGerant }))
+    .donnees.comptes.find((c) => c.code === 'COF').soldeCentimes;
+
+  const avanceSalaire = await appel('/personnel/avances', {
+    methode: 'POST', jeton: jetonGerant,
+    corps: {
+      employeId: karim.id, compteId: coffre.id,
+      montantCentimes: 1000000, motif: 'Rentree scolaire',
+    },
+  });
+  verifier('Une avance sur salaire s\'enregistre',
+    typeof avanceSalaire.donnees?.numero === 'string',
+    avanceSalaire.donnees?.numero ?? JSON.stringify(avanceSalaire.donnees)?.slice(0, 80));
+
+  const coffreApres = (await appel('/tresorerie/situation', { jeton: jetonGerant }))
+    .donnees.comptes.find((c) => c.code === 'COF').soldeCentimes;
+  verifier('Elle sort reellement de la tresorerie, dans la meme transaction',
+    coffreApres === coffreAvant - 1000000,
+    `${coffreAvant / 100} -> ${coffreApres / 100} DA`);
+
+  const maintenant = new Date();
+  const periodePaie = {
+    employeId: karim.id,
+    annee: maintenant.getFullYear(),
+    mois: maintenant.getMonth() + 1,
+  };
+
+  const preparation = await appel('/personnel/paie/preparer', {
+    methode: 'POST', jeton: jetonGerant, corps: periodePaie,
+  });
+  verifier('Un bulletin se prepare sans etre enregistre',
+    preparation.donnees?.bulletin?.brutCentimes > 0,
+    `brut ${preparation.donnees?.bulletin?.brutCentimes / 100} DA`);
+  verifier('Il reprend les heures du pointage',
+    preparation.donnees?.entrees?.heuresTravaillees === 9.5);
+  verifier('Il voit l\'avance a rembourser',
+    preparation.donnees?.entrees?.avancesACombler?.[0]?.resteCentimes === 1000000);
+  verifier('Les primes de panier et de transport sont exonerees de cotisations',
+    preparation.donnees?.bulletin?.primesExonereesCentimes === 800000,
+    `${preparation.donnees?.bulletin?.primesExonereesCentimes / 100} DA exoneres`);
+
+  // Le net doit se recouper a la main : c'est le chiffre que l'employe
+  // verifiera, et il doit pouvoir refaire l'operation.
+  const bul = preparation.donnees.bulletin;
+  verifier('Le net se recoupe : brut moins cotisations, impot et retenues',
+    bul.netAPayerCentimes
+      === bul.brutCentimes - bul.cotisationsCentimes - bul.irgCentimes - bul.retenuesCentimes,
+    `${bul.netAPayerCentimes} centimes`);
+
+  const bulletin = await appel('/personnel/paie/etablir', {
+    methode: 'POST', jeton: jetonGerant, corps: periodePaie,
+  });
+  verifier('Le bulletin s\'etablit',
+    typeof bulletin.donnees?.numero === 'string',
+    bulletin.donnees?.numero ?? JSON.stringify(bulletin.donnees)?.slice(0, 100));
+
+  const rejeuPaie = await appel('/personnel/paie/etablir', {
+    methode: 'POST', jeton: jetonGerant, corps: periodePaie,
+  });
+  verifier('Relancer la paie du meme mois ne cree pas un second bulletin',
+    rejeuPaie.donnees?.numero === bulletin.donnees?.numero);
+
+  // Le recalcul doit garder la retenue d'avance. L'oublier laissait
+  // l'avance marquee remboursee et rendait le salaire entier :
+  // l'employe gardait l'argent deux fois.
+  verifier('Et il garde la retenue d\'avance',
+    rejeuPaie.donnees?.retenuesCentimes === 1000000
+      && rejeuPaie.donnees?.netAPayerCentimes === bulletin.donnees?.netAPayerCentimes,
+    `retenues ${rejeuPaie.donnees?.retenuesCentimes}, net ${rejeuPaie.donnees?.netAPayerCentimes}`);
+
+  const dossierKarim = await appel(`/personnel/employes/${karim.id}`, { jeton: jetonGerant });
+  verifier('L\'avance est rattachee au bulletin et ne reviendra pas',
+    dossierKarim.donnees?.avances?.[0]?.rembourseCentimes === 1000000);
+
+  const versement = await appel(
+    `/personnel/paie/bulletins/${bulletin.donnees.id}/versement`,
+    { methode: 'POST', jeton: jetonGerant },
+  );
+  verifier('Le bulletin se marque comme verse', versement.donnees?.payeLe !== null);
+
+  const apresVersement = await appel('/personnel/paie/etablir', {
+    methode: 'POST', jeton: jetonGerant, corps: periodePaie,
+  });
+  verifier('Un bulletin deja verse ne se recalcule pas',
+    apresVersement.statut === 400,
+    String(apresVersement.donnees?.message ?? '').slice(0, 60));
+
+  const livre = await appel('/personnel/paie/livre', { jeton: jetonGerant });
+  verifier('Le livre de paie reprend le bulletin',
+    livre.donnees?.totaux?.nombreBulletins === 1
+      && livre.donnees?.totaux?.nombreVerses === 1);
+  verifier('Ses totaux se recoupent avec le bulletin',
+    livre.donnees?.totaux?.netAPayerCentimes === bulletin.donnees?.netAPayerCentimes);
+
+  const performance = await appel('/personnel/performance', { jeton: jetonGerant });
+  verifier('La performance par employe repond',
+    (performance.donnees?.lignes ?? []).length === 4);
+  const perfKarim = (performance.donnees?.lignes ?? [])
+    .find((l) => l.matricule === 'E0001');
+  verifier('Elle rapproche les ventes encaissees du pointage',
+    perfKarim?.nombreTickets > 0 && perfKarim?.joursPointes === 1,
+    `${perfKarim?.nombreTickets} ticket(s), ${perfKarim?.joursPointes} jour pointe`);
+
+  // Documents.
+  for (const [chemin, libelle] of [
+    [`/personnel/paie/bulletins/${bulletin.donnees.id}/document.pdf`, 'Le bulletin de paie'],
+    [`/personnel/employes/${karim.id}/attestation.pdf`, 'L\'attestation de travail'],
+    ['/personnel/paie/livre/export.xlsx', 'Le livre de paie en Excel'],
+    ['/personnel/performance/export.pdf', 'La performance en PDF'],
+  ]) {
+    const reponse = await fetch(`${BASE}${chemin}`, {
+      headers: { Authorization: `Bearer ${jetonGerant}` },
+    });
+    const octets = Buffer.from(await reponse.arrayBuffer());
+    const signature = chemin.endsWith('.pdf')
+      ? octets.subarray(0, 5).toString() === '%PDF-'
+      : octets.subarray(0, 2).toString() === 'PK';
+    verifier(`${libelle} se produit`,
+      reponse.status === 200 && signature && octets.length > 500,
+      `${reponse.status}, ${octets.length} octets`);
+  }
+
+  const certificatEnPoste = await appel(
+    `/personnel/employes/${karim.id}/attestation.pdf?certificat=true`,
+    { jeton: jetonGerant },
+  );
+  verifier('Un certificat de travail est refuse a un employe en poste',
+    certificatEnPoste.statut === 400,
+    String(certificatEnPoste.donnees?.message ?? '').slice(0, 60));
+
+  // Confidentialite : la section 6 reserve les dossiers au gerant et au
+  // comptable, et ouvre a chacun ses propres documents.
+  const connexionCaissier1 = await appel('/auth/connexion', {
+    methode: 'POST',
+    corps: { login: 'caissier1', motDePasse: 'GestGlobale2026!' },
+  });
+  const jetonCaissier1 = connexionCaissier1.donnees?.jeton;
+
+  const dossiersVusParCaissier = await appel('/personnel/employes', { jeton: jetonCaissier1 });
+  verifier('Un caissier ne voit pas les dossiers du personnel',
+    dossiersVusParCaissier.statut === 403, `statut ${dossiersVusParCaissier.statut}`);
+
+  const sonDossier = await appel('/personnel/moi', { jeton: jetonCaissier1 });
+  verifier('Mais il accede a son propre dossier et a ses bulletins',
+    sonDossier.statut === 200
+      && sonDossier.donnees?.employe?.matricule === 'E0001'
+      && sonDossier.donnees?.bulletins?.length === 1,
+    `${sonDossier.donnees?.bulletins?.length} bulletin(s)`);
+  verifier('Et il y lit son solde de conges',
+    sonDossier.donnees?.employe?.soldeCongesJours === 25);
+
+  const autre = (employes.donnees ?? []).find((e) => e.matricule === 'E0002');
+  const dossierDAutrui = await appel(
+    `/personnel/employes/${autre.id}/attestation.pdf`, { jeton: jetonCaissier1 },
+  );
+  verifier('Il ne peut pas tirer les documents d\'un collegue',
+    dossierDAutrui.statut === 403,
+    String(dossierDAutrui.donnees?.message ?? '').slice(0, 60));
+
+  titre('20. Un depart coupe les acces (M13)');
+
+  const avantDepart = await appel('/auth/connexion-pin', {
+    methode: 'POST', corps: { code: '3', pin: '1234' },
+  });
+  verifier('Le caissier ouvre sa caisse avant son depart',
+    Boolean(avantDepart.donnees?.jeton));
+
+  const depart = await appel(`/personnel/employes/${karim.id}/sortie`, {
+    methode: 'POST', jeton: jetonGerant,
+    corps: { dateSortie: new Date().toISOString(), motif: 'Demission' },
+  });
+  verifier('La sortie ferme le dossier et desactive le compte',
+    depart.donnees?.actif === false && depart.donnees?.compteDesactive === 'caissier1',
+    `compte desactive : ${depart.donnees?.compteDesactive}`);
+
+  // Le point qui compte : un caissier parti dont le code PIN ouvre
+  // encore la caisse est la faille classique d'un commerce.
+  const apresDepart = await appel('/auth/connexion-pin', {
+    methode: 'POST', corps: { code: '3', pin: '1234' },
+  });
+  verifier('Son code PIN n\'ouvre plus la caisse',
+    apresDepart.statut === 401, `statut ${apresDepart.statut}`);
+
+  const motDePasseApres = await appel('/auth/connexion', {
+    methode: 'POST', corps: { login: 'caissier1', motDePasse: 'GestGlobale2026!' },
+  });
+  verifier('Ni son mot de passe au back-office',
+    motDePasseApres.statut === 401, `statut ${motDePasseApres.statut}`);
+
+  const jetonRevoque = await appel('/personnel/moi', { jeton: jetonCaissier1 });
+  verifier('Le jeton qu\'il avait en poche ne sert plus a rien non plus',
+    jetonRevoque.statut === 401 || jetonRevoque.statut === 403,
+    `statut ${jetonRevoque.statut}`);
+
+  const certificatApres = await fetch(
+    `${BASE}/personnel/employes/${karim.id}/attestation.pdf?certificat=true`,
+    { headers: { Authorization: `Bearer ${jetonGerant}` } },
+  );
+  verifier('Le certificat de travail se delivre maintenant qu\'il est sorti',
+    certificatApres.status === 200, `statut ${certificatApres.status}`);
+
+  titre('21. Journal d\'audit');
 
   const audit = await appel('/audit?taille=5', { jeton: jetonGerant });
   verifier('Le journal d\'audit enregistre les actions', (audit.donnees?.total ?? 0) > 0,

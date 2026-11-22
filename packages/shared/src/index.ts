@@ -6,5 +6,6 @@ export * from './domain/tarification';
 export * from './domain/caisse';
 export * from './domain/credit';
 export * from './domain/promotions';
+export * from './domain/paie';
 export * from './types/droits';
 export * from './types/synchronisation';

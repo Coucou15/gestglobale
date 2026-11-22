@@ -167,6 +167,7 @@ function nomOnglet(titre: string, index: number): string {
 
 const MARGE = 36;
 const A4_PAYSAGE = { largeur: 842, hauteur: 595 };
+const A4_PORTRAIT = { largeur: 595, hauteur: 842 };
 
 /**
  * PDF A4 paysage.
@@ -177,11 +178,20 @@ const A4_PAYSAGE = { largeur: 842, hauteur: 595 };
  * un ProLiant ML330 G6 sous Windows Server : y installer et y faire
  * tourner Chromium pour fabriquer un PDF serait disproportionne.
  */
-export function enPdf(rapport: Rapport): Promise<Buffer> {
+export function enPdf(
+  rapport: Rapport,
+  options: { orientation?: 'paysage' | 'portrait' } = {},
+): Promise<Buffer> {
+  // Le portrait sert aux pieces qu'on remet a une personne — bulletin de
+  // paie, attestation : on les plie et on les classe, elles ne sont pas
+  // faites pour un tableau de dix colonnes.
+  const portrait = options.orientation === 'portrait';
+  const page = portrait ? A4_PORTRAIT : A4_PAYSAGE;
+
   return new Promise((resoudre, rejeter) => {
     const doc = new PDFDocument({
       size: 'A4',
-      layout: 'landscape',
+      layout: portrait ? 'portrait' : 'landscape',
       margins: { top: MARGE, bottom: MARGE, left: MARGE, right: MARGE },
       info: { Title: rapport.titre, Author: 'GestGlobale' },
     });
@@ -191,7 +201,7 @@ export function enPdf(rapport: Rapport): Promise<Buffer> {
     doc.on('end', () => resoudre(Buffer.concat(morceaux)));
     doc.on('error', rejeter);
 
-    const largeurUtile = A4_PAYSAGE.largeur - 2 * MARGE;
+    const largeurUtile = page.largeur - 2 * MARGE;
 
     /**
      * Ramene le curseur a la marge gauche.
@@ -218,7 +228,7 @@ export function enPdf(rapport: Rapport): Promise<Buffer> {
     doc.moveDown(0.8);
 
     if (rapport.enTete && rapport.enTete.length > 0) {
-      const parLigne = 4;
+      const parLigne = portrait ? 2 : 4;
       const largeurCase = largeurUtile / parLigne;
       for (let i = 0; i < rapport.enTete.length; i += parLigne) {
         const tranche = rapport.enTete.slice(i, i + parLigne);
@@ -237,7 +247,7 @@ export function enPdf(rapport: Rapport): Promise<Buffer> {
     }
 
     for (const bloc of rapport.blocs) {
-      dessinerBloc(doc, bloc, largeurUtile);
+      dessinerBloc(doc, bloc, largeurUtile, page.hauteur);
       aLaMarge();
       doc.moveDown(0.8);
     }
@@ -248,7 +258,7 @@ export function enPdf(rapport: Rapport): Promise<Buffer> {
       // Mesurer plutot que deviner : une marge forfaitaire envoyait la
       // note seule sur une page vierge alors que la place restait.
       const hauteurNote = doc.heightOfString(rapport.note, { width: largeurUtile });
-      if (doc.y + hauteurNote > A4_PAYSAGE.hauteur - MARGE) doc.addPage();
+      if (doc.y + hauteurNote > page.hauteur - MARGE) doc.addPage();
       doc.fillColor('#555')
         .text(rapport.note, MARGE, doc.y, { width: largeurUtile })
         .fillColor('#000');
@@ -260,9 +270,11 @@ export function enPdf(rapport: Rapport): Promise<Buffer> {
 
 type Pdf = PDFKit.PDFDocument;
 
-function dessinerBloc(doc: Pdf, bloc: Bloc, largeurUtile: number): void {
+function dessinerBloc(
+  doc: Pdf, bloc: Bloc, largeurUtile: number, hauteurPage = A4_PAYSAGE.hauteur,
+): void {
   if (bloc.titre) {
-    if (doc.y > A4_PAYSAGE.hauteur - MARGE - 60) doc.addPage();
+    if (doc.y > hauteurPage - MARGE - 60) doc.addPage();
     doc.font('Helvetica-Bold').fontSize(11)
       .text(bloc.titre, MARGE, doc.y, { width: largeurUtile });
     doc.moveDown(0.3);
@@ -301,7 +313,7 @@ function dessinerBloc(doc: Pdf, bloc: Bloc, largeurUtile: number): void {
   dessinerEntete();
 
   const ecrireLigne = (source: Record<string, unknown>, gras: boolean) => {
-    if (doc.y > A4_PAYSAGE.hauteur - MARGE - hauteurLigne) {
+    if (doc.y > hauteurPage - MARGE - hauteurLigne) {
       doc.addPage();
       dessinerEntete();
     }

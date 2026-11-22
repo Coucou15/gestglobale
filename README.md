@@ -17,7 +17,7 @@ a M8, l'assistant de migration et la caisse hors ligne.
 | Back-office web (React) | tableau de bord, articles, promotions, stocks, factures et bons de livraison, receptions, inventaires, caisses, tiers, tresorerie, historique repris, audit |
 | Assistant d'import | lit l'export Excel de l'ancien logiciel, le controle et le charge |
 
-**369 verifications automatisees** passent contre une vraie base, une API
+**438 verifications automatisees** passent contre une vraie base, une API
 reellement demarree et, pour la caisse, un vrai Electron : `pnpm recette`.
 
 Le parcours de saisie est verifie dans un vrai navigateur, de la
@@ -26,7 +26,7 @@ reception a l'inventaire jusqu'au cloisonnement des droits :
 Les ecrans de documents, d'historique, de promotions et de fidelite ont
 chacun leur verification : `test-documents.mjs`, `test-historique.mjs`,
 `test-promotions.mjs`, `test-fidelite.mjs`, `test-rapports.mjs`,
-`test-transferts.mjs`, `test-comptabilite.mjs`.
+`test-transferts.mjs`, `test-comptabilite.mjs`, `test-personnel.mjs`.
 
 Le resume quotidien du gerant demande un relais de messagerie, que le
 client doit fournir : voir [`docs/resume-quotidien.md`](docs/resume-quotidien.md).
@@ -279,9 +279,9 @@ le serveur et enchaine :
 
 | Suite | Verifications |
 |---|---|
-| Noyau metier (hors base, hors reseau) | 67 |
+| Noyau metier (hors base, hors reseau) | 92 |
 | Nettoyage a l'import et documents de vente | 61 |
-| Recette fonctionnelle du lot 1, M9, M10, M11 et M12 | 180 |
+| Recette fonctionnelle des lots 1, 2 et 3 | 224 |
 | Coupure reseau de la caisse | 20 |
 | Cartes cadeaux pendant une coupure | 8 |
 | La caisse de bout en bout sous Electron | 33 |
@@ -332,10 +332,13 @@ le lot 2 est livre — M9, les rapports du gerant avec leurs exports Excel
 et PDF et le resume quotidien ; M10, promotions, points de fidelite,
 cartes cadeaux et bons d'achat, tous appliques en caisse hors ligne
 comprise ; M11, transferts inter-magasins a deux temps et consolidation
-du groupe — et M12, les journaux comptables et l'etat pour les
-declarations. Restent l'execution de l'installateur sur une vraie
-machine Windows, sa signature, le relais de messagerie pour l'envoi
-automatique, et M13, la gestion du personnel.
+du groupe ; M12, les journaux comptables et l'etat pour les
+declarations ; et M13, la gestion du personnel, de l'embauche a la
+paie. **Les treize modules du cahier des charges sont livres.**
+Restent l'execution de l'installateur sur une vraie machine Windows, sa
+signature, le relais de messagerie pour l'envoi automatique, et les
+deux baremes que votre comptable doit confirmer : la TVA et les
+cotisations de paie.
 
 Plusieurs points demandent une decision de votre part avant d'aller plus
 loin ; ils sont listes a la fin du meme document.

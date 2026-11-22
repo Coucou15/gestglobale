@@ -27,7 +27,7 @@ a venir = non commence.
 | M10 | Fidelite et promotions | 2 | **fait** — promotions, points de fidelite, cartes cadeaux et bons d'achat, appliques en caisse hors ligne comprise |
 | M11 | Multi-magasins | 2 | **fait** — catalogue central, prix par magasin, transferts inter-magasins a deux temps avec bon d'expedition et bon de reception, consolidation du groupe |
 | M12 | Comptabilite et exports | 3 | **fait** — journaux des ventes, des achats et de tresorerie, exports CSV, Excel et PDF, etat pour les declarations ; le regime fiscal reste a confirmer avec le comptable |
-| M13 | Gestion du personnel | 3 | *partiel* — modele de donnees complet ; fonctionnalites a faire |
+| M13 | Gestion du personnel | 3 | **fait** — dossiers, contrats, pointage, plannings, conges, avances, paie, documents et performance ; les taux de cotisations et d'IRG restent a valider avec le comptable |
 
 ### Detail des modules du lot 1
 
@@ -82,8 +82,8 @@ encaissements et decaissements, transferts a double validation ou le
 demandeur ne peut pas valider, rapprochement bancaire, situation
 consolidee. Les comptes d'especes — caisse, tiroir, coffre — refusent un
 solde negatif, puisqu'on ne sort pas des billets qui ne sont pas la ;
-banque et CCP admettent un decouvert. **Reste** : rattacher une avance
-sur salaire a un employe une fois le module M13 construit.
+banque et CCP admettent un decouvert. Une avance sur salaire se rattache a
+son employe et se deduit de sa paie suivante (M13).
 
 **M8 — Utilisateurs et droits.** Matrice des six roles, droits ajoutes ou
 retires individuellement, plages horaires, postes autorises, blocage apres
@@ -157,6 +157,43 @@ tresorerie et ruptures, magasin par magasin puis additionnes. La
 tresorerie du siege y figure a part, parce qu'elle n'appartient a aucun
 magasin. La marchandise en transit a sa colonne : la confondre avec du
 stock vendable ferait croire a une disponibilite qui n'existe pas.
+
+**M13 — Gestion du personnel.** Dossiers d'employes, contrats,
+pointage, plannings, conges, avances, paie, documents et performance.
+
+**Un depart coupe les acces.** C'est la faille classique d'un commerce :
+un caissier parti dont le code PIN ouvre encore la caisse. Enregistrer
+une sortie ferme le dossier, clot les contrats, desactive le compte et
+revoque ses jetons, le tout dans une seule transaction — il n'y a rien
+a ne pas oublier. Le compte est en outre verifie actif a **chaque
+requete**, et pas seulement a la connexion : sans cela, la session
+ouverte au moment du depart restait valable un quart d'heure.
+
+**Les taux de paie ne sont pas dans le code.** Cotisations sociales,
+tranches d'impot et majoration des heures supplementaires viennent d'un
+bareme parametrable, conserve sur chaque bulletin : un bulletin de l'an
+dernier reste justifiable avec les taux de l'an dernier. Les valeurs
+par defaut sont plausibles pour l'Algerie mais **doivent etre validees
+par votre comptable** avant la premiere paie — le cahier des charges le
+demande explicitement, et le logiciel ne peut pas le deviner.
+
+Un bulletin se compose de faits deja enregistres ailleurs : le contrat
+donne le salaire et les primes fixes, le pointage les heures, les
+absences les retenues, les avances ce qui reste a rembourser. Rien
+n'est saisi deux fois. Le calcul lui-meme vit dans le noyau partage,
+avec ses tests, pour pouvoir etre rejoue et verifie sans base de
+donnees.
+
+**Retenir un ecart de caisse sur un salaire reste desactive par
+defaut.** Le cahier des charges le prevoit « si la regle interne le
+prevoit » : c'est une decision du client, pas un effet de bord du
+logiciel. L'ecart est signale sur le bulletin sans etre preleve tant
+que vous ne l'avez pas decide.
+
+Les salaires et les dossiers ne sont visibles que du gerant et du
+comptable. Chaque employe accede en revanche a ses propres bulletins et
+a son solde de conges, depuis son telephone, et a rien d'autre : tirer
+le document d'un collegue est refuse.
 
 **M12 — Comptabilite et exports.** Trois journaux — ventes, achats,
 tresorerie — et un etat pour les declarations. Ils sortent des memes
@@ -260,6 +297,7 @@ bon vient peut-etre d'etre emis.
 | Rapport mensuel rendu en moins de 5 secondes | **verifie au volume reel** — 27 ms pour la synthese, 159 ms pour les ruptures sur 30 000 articles, 176 ms pour la consolidation ; les exports Excel et PDF tiennent sous 210 ms |
 | Transfert inter-magasins : ce qui part, ce qui arrive et l'ecart sont traces separement | **verifie** — le groupe ne perd que la quantite reellement manquante |
 | Journaux comptables exportables au format du comptable | **verifie** — CSV relu ligne a ligne, totaux identiques a l'ecran au centime ; le format exact du cabinet reste a confirmer |
+| Le depart d'un employe coupe ses acces | **verifie** — apres la sortie, ni son code PIN, ni son mot de passe, ni le jeton qu'il avait en cours ne donnent plus la main |
 | Restauration complete depuis la sauvegarde de la veille en moins d'une heure | **a eprouver** a l'installation |
 
 ---
@@ -303,7 +341,16 @@ continuer, mais chacun changera du code s'il est tranche plus tard.
    processeur installe, quantite de memoire, type de controleur RAID et
    etat des disques du ProLiant ML330 G6.
 
-8. **Relais de messagerie pour le resume quotidien.** Le resume est
+8. **Taux de cotisations et d'impot sur le revenu.** Le bareme de paie
+   est en place et parametrable, mais ses valeurs par defaut sont des
+   valeurs plausibles, pas des valeurs verifiees. Avant la premiere
+   paie faite avec GestGlobale, votre comptable doit confirmer : part
+   salariale et part patronale des cotisations, tranches de l'IRG,
+   majoration des heures supplementaires, et quelles primes sont
+   exonerees. Dites-nous aussi si un ecart de caisse peut etre retenu
+   sur un salaire : c'est desactive par defaut.
+
+9. **Relais de messagerie pour le resume quotidien.** Le resume est
    produit et conserve chaque matin, mais il ne peut pas partir sans un
    relais : adresse du serveur, port, identifiants, adresse
    d'expedition. Faute de messagerie d'entreprise, deux solutions

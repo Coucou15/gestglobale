@@ -12,6 +12,7 @@ import { Fidelite } from './pages/Fidelite';
 import { Rapports } from './pages/Rapports';
 import { Transferts } from './pages/Transferts';
 import { Comptabilite } from './pages/Comptabilite';
+import { Personnel } from './pages/Personnel';
 import { Inventaires } from './pages/Inventaires';
 import { Caisses } from './pages/Caisses';
 import { Tiers } from './pages/Tiers';
@@ -43,6 +44,7 @@ const ENTREES = [
   { chemin: '/tiers', libelle: 'Clients et fournisseurs', droit: 'tiers.voir' },
   { chemin: '/tresorerie', libelle: 'Tresorerie', droit: 'tresorerie.voir' },
   { chemin: '/historique', libelle: 'Historique repris', droit: 'rapport.son_magasin' },
+  { chemin: '/personnel', libelle: 'Personnel', droit: 'personnel.voir' },
   { chemin: '/comptabilite', libelle: 'Comptabilite', droit: 'rapport.tous' },
   { chemin: '/audit', libelle: 'Journal d’audit', droit: 'audit.consulter' },
 ];
@@ -147,6 +149,7 @@ export function Application() {
             ['/tiers', 'tiers.voir', <Tiers />],
             ['/tresorerie', 'tresorerie.voir', <Tresorerie utilisateur={utilisateur} />],
             ['/historique', 'rapport.son_magasin', <Historique />],
+            ['/personnel', 'personnel.voir', <Personnel utilisateur={utilisateur} />],
             ['/comptabilite', 'rapport.tous', <Comptabilite utilisateur={utilisateur} />],
             ['/audit', 'audit.consulter', <Audit />],
           ] as Array<[string, string, ReactElement]>).map(([chemin, droit, element]) => (

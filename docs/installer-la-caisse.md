@@ -130,3 +130,21 @@ vert.
   vente, impression, remontee. **L'installateur Windows lui-meme n'a pas
   encore ete execute sur une machine Windows** : c'est la premiere chose
   a faire sur le poste pilote.
+
+---
+
+## Apres une mise a jour qui change la base
+
+Appliquer une migration pendant que le serveur tourne peut le laisser
+avec des plans de requete perimes : PostgreSQL rend alors
+« cached plan must not change result type » sur les ecritures qui
+touchent une table modifiee, jusqu'au prochain redemarrage.
+
+La regle est donc simple, et l'installeur Windows la suit :
+
+1. arreter le service GestGlobale ;
+2. appliquer les migrations ;
+3. redemarrer le service.
+
+Les caisses n'ont rien a faire : elles continuent de vendre hors ligne
+pendant l'operation et remontent leurs tickets au retour du serveur.

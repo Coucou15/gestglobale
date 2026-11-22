@@ -8,7 +8,7 @@
  * Il ne remplace pas l'import de l'ancien logiciel (section 7) : c'est un
  * socle pour les essais, la formation et la recette.
  */
-import { PrismaClient, TypeEmplacement, TypeCompte, CodeRole, TypeTiers, TypeClient, CategoriePrix, UniteMesure, TypeBon } from '@prisma/client';
+import { PrismaClient, TypeEmplacement, TypeCompte, CodeRole, TypeTiers, TypeClient, CategoriePrix, UniteMesure, TypeBon, TypeContrat } from '@prisma/client';
 import * as argon2 from 'argon2';
 
 const prisma = new PrismaClient();
@@ -426,6 +426,106 @@ async function main(): Promise<void> {
     },
   });
 
+  // --- Personnel (M13) ---------------------------------------------------
+  // Les comptes de caisse existent deja ; on leur donne un dossier
+  // d'employe, pour que le pointage, la paie et la performance aient de
+  // quoi s'accrocher.
+  const bareme = {
+    cotisationSalarialePourcent: 9,
+    cotisationPatronalePourcent: 26,
+    tranchesIrg: [
+      { plafondCentimes: 2000000, tauxPourcent: 0 },
+      { plafondCentimes: 4000000, tauxPourcent: 20 },
+      { plafondCentimes: 8000000, tauxPourcent: 30 },
+      { plafondCentimes: null, tauxPourcent: 35 },
+    ],
+    heuresParSemaine: 40,
+    majorationHeureSupPourcent: 50,
+    // Retenir un ecart de caisse sur un salaire est un acte grave : il
+    // reste desactive tant que le client ne l'a pas decide.
+    retenirEcartsDeCaisse: false,
+    primesExonerees: ['PANIER', 'TRANSPORT'],
+  };
+  await prisma.parametre.create({
+    data: {
+      cle: 'paie.bareme',
+      valeur: bareme,
+      description:
+        'Bareme de paie (M13) : cotisations, tranches d\u2019IRG et majoration des '
+        + 'heures supplementaires. Valeurs plausibles pour l\u2019Algerie, '
+        + 'A VALIDER PAR LE COMPTABLE avant la premiere paie.',
+    },
+  });
+
+  const personnel = [
+    {
+      matricule: 'E0001', nom: 'Benali', prenom: 'Karim', poste: 'Caissier',
+      login: 'caissier1', salaireBaseCentimes: 4000000,
+      type: TypeContrat.CDI, finDansJours: null,
+    },
+    {
+      matricule: 'E0002', nom: 'Haddad', prenom: 'Samia', poste: 'Caissiere',
+      login: 'caissier2', salaireBaseCentimes: 4000000,
+      type: TypeContrat.CDD, finDansJours: 20,
+    },
+    {
+      matricule: 'E0003', nom: 'Cherif', prenom: 'Nadia', poste: 'Magasinier',
+      login: 'magasinier1', salaireBaseCentimes: 3800000,
+      type: TypeContrat.ESSAI, finDansJours: 12,
+    },
+    {
+      matricule: 'E0004', nom: 'Ziani', prenom: 'Omar', poste: 'Agent de rayon',
+      login: null, salaireBaseCentimes: 2600000, type: TypeContrat.TEMPS_PARTIEL,
+      finDansJours: null, heuresParSemaine: 20,
+    },
+  ];
+
+  for (const p of personnel) {
+    const employe = await prisma.employe.create({
+      data: {
+        matricule: p.matricule,
+        nom: p.nom,
+        prenom: p.prenom,
+        poste: p.poste,
+        magasinId: magasin.id,
+        dateEmbauche: new Date(Date.now() - 400 * 86400000),
+        nin: `10${p.matricule.slice(1)}000000000`,
+        numeroSecuriteSociale: `99${p.matricule.slice(1)}0000`,
+        telephone: '05' + p.matricule.slice(1) + '00000',
+        soldeCongesJours: 30,
+      },
+    });
+
+    await prisma.contrat.create({
+      data: {
+        employeId: employe.id,
+        type: p.type,
+        debut: new Date(Date.now() - 400 * 86400000),
+        fin: p.finDansJours === null
+          ? null
+          : new Date(Date.now() + p.finDansJours * 86400000),
+        salaireBaseCentimes: BigInt(p.salaireBaseCentimes),
+        heuresParSemaine: p.heuresParSemaine ?? 40,
+        primesFixes: [
+          { code: 'PANIER', libelle: 'Prime de panier', montantCentimes: 500000 },
+          { code: 'TRANSPORT', libelle: 'Prime de transport', montantCentimes: 300000 },
+        ],
+      },
+    });
+
+    // Rattachement au compte utilisateur : un depart coupera ses acces.
+    //
+    // Sans .catch() : un rattachement qui echoue doit faire echouer le
+    // jeu d'essai. Le silencer laissait croire que le lien existait
+    // alors qu'aucun dossier n'etait rattache a son compte.
+    if (p.login) {
+      await prisma.utilisateur.update({
+        where: { login: p.login },
+        data: { employeId: employe.id },
+      });
+    }
+  }
+
   // --- Cartes cadeaux et bons d'achat (M10) ------------------------------
   // Trois cartes de 1 000 DA et deux bons de 500 DA, de quoi essayer un
   // reglement par bon en caisse, hors ligne comme en ligne.
@@ -502,6 +602,7 @@ Jeu de donnees cree.
   Promotions     : 4 (prix barre, X pour Y, remise famille, happy hour)
   Bons d'achat   : ${codeBon('CAD', 1)} a ${codeBon('CAD', 3)} (1 000 DA),
                    ${codeBon('BON', 1)} et ${codeBon('BON', 2)} (500 DA)
+  Personnel      : 4 employes, dont un CDD et un essai a echeance proche
   Gerant         : login "gerant", mot de passe "${MOT_DE_PASSE_DEMO}"
   Caisse         : code "3", PIN "${PIN_DEMO}"
 
