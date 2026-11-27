@@ -23,8 +23,9 @@
 
 [CmdletBinding()]
 param(
-    # Dossier ou vit le projet.
-    [string] $Dossier = (Split-Path -Parent $PSScriptRoot),
+    # Dossier ou vit le projet. Vide : il est deduit plus bas de
+    # l'endroit ou se trouve ce script.
+    [string] $Dossier = '',
 
     # Mot de passe du compte PostgreSQL « postgres ».
     # Laisse vide : il est tire au hasard a l'installation, ou demande
@@ -37,6 +38,44 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+# --------------------------------------------------------------------
+# Ou vit le projet
+# --------------------------------------------------------------------
+# Le script est dans <projet>\installateur\ : le projet est donc le
+# dossier parent. $PSScriptRoot n'est pas toujours renseigne au moment
+# ou PowerShell lit les parametres, d'ou ce calcul ici, avec de quoi
+# retomber sur ses pieds.
+
+if (-not $Dossier) {
+    $dossierDuScript = $PSScriptRoot
+    if (-not $dossierDuScript -and $PSCommandPath) {
+        $dossierDuScript = Split-Path -Parent $PSCommandPath
+    }
+    if (-not $dossierDuScript -and $MyInvocation.MyCommand.Path) {
+        $dossierDuScript = Split-Path -Parent $MyInvocation.MyCommand.Path
+    }
+
+    if ($dossierDuScript) {
+        $Dossier = Split-Path -Parent $dossierDuScript
+    }
+
+    # Dernier recours : le dossier courant, s'il ressemble au projet.
+    if (-not $Dossier) {
+        $Dossier = (Get-Location).Path
+    }
+}
+
+$Dossier = $Dossier.TrimEnd('\')
+
+if (-not $Dossier) {
+    Write-Host ''
+    Write-Host "  Impossible de deviner ou mettre le projet." -ForegroundColor Red
+    Write-Host "  Relancez en le disant vous-meme, par exemple :" -ForegroundColor Gray
+    Write-Host "      .\installateur\installer-serveur.ps1 -Dossier C:\GestGlobale" -ForegroundColor Gray
+    Write-Host ''
+    exit 1
+}
 
 # --------------------------------------------------------------------
 # Affichage
@@ -85,6 +124,26 @@ function Administrateur {
     $identite = [Security.Principal.WindowsIdentity]::GetCurrent()
     (New-Object Security.Principal.WindowsPrincipal $identite).IsInRole(
         [Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+# L'installateur d'EnterpriseDB ne met pas psql dans le PATH : sans
+# cela le script croirait PostgreSQL absent, et ne saurait pas creer la
+# base.
+function Trouver-Psql {
+    $surLeChemin = Get-Command 'psql' -ErrorAction SilentlyContinue
+    if ($surLeChemin) { return $surLeChemin.Source }
+
+    $racines = @("$env:ProgramFiles\PostgreSQL", "${env:ProgramFiles(x86)}\PostgreSQL")
+    foreach ($racine in $racines) {
+        if (-not (Test-Path $racine)) { continue }
+        $versions = Get-ChildItem $racine -Directory -ErrorAction SilentlyContinue |
+                    Sort-Object Name -Descending
+        foreach ($version in $versions) {
+            $chemin = Join-Path $version.FullName 'bin\psql.exe'
+            if (Test-Path $chemin) { return $chemin }
+        }
+    }
+    return $null
 }
 
 function Secret-Au-Hasard {
@@ -148,7 +207,10 @@ function Installer-Paquet {
 Installer-Paquet -Identifiant 'Git.Git' -Nom 'Git' -Commande 'git' | Out-Null
 Installer-Paquet -Identifiant 'OpenJS.NodeJS.LTS' -Nom 'Node.js' -Commande 'node' | Out-Null
 
-$postgresDejaLa = Commande-Existe 'psql'
+$cheminEnv = Join-Path $Dossier 'apps\api\.env'
+$configDejaLa = Test-Path $cheminEnv
+
+$postgresDejaLa = $null -ne (Trouver-Psql)
 if (-not $postgresDejaLa) {
     if (-not $MotDePassePostgres) {
         $MotDePassePostgres = Secret-Au-Hasard -Octets 12
@@ -162,7 +224,10 @@ if (-not $postgresDejaLa) {
     Recharger-Chemin
 } else {
     Ecrire-Bien 'PostgreSQL : deja installe'
-    if (-not $MotDePassePostgres) {
+    if (-not $MotDePassePostgres -and $configDejaLa) {
+        Ecrire-Info 'configuration deja ecrite : son mot de passe n est pas redemande'
+    }
+    elseif (-not $MotDePassePostgres) {
         if ($SansQuestion) {
             Arreter 'PostgreSQL est deja installe mais son mot de passe n est pas connu.' `
                 'Relancez avec -MotDePassePostgres "votre-mot-de-passe".'
@@ -231,7 +296,6 @@ Ecrire-Bien 'dependances installees'
 
 Ecrire-Etape 'Configuration'
 
-$cheminEnv = Join-Path $Dossier 'apps\api\.env'
 if (Test-Path $cheminEnv) {
     Ecrire-Bien 'configuration deja en place, laissee telle quelle'
 } else {
@@ -242,10 +306,13 @@ if (Test-Path $cheminEnv) {
     $modele = $modele -replace 'JWT_SECRET="[^"]*"', "JWT_SECRET=`"$(Secret-Au-Hasard)`""
     $modele = $modele -replace 'JWT_REFRESH_SECRET="[^"]*"', "JWT_REFRESH_SECRET=`"$(Secret-Au-Hasard)`""
 
-    $urlBase = "postgresql://postgres:$MotDePassePostgres@localhost:5432/gestglobale?schema=public"
+    $motDePasseEchappe = [uri]::EscapeDataString($MotDePassePostgres)
+    $urlBase = "postgresql://postgres:$motDePasseEchappe@localhost:5432/gestglobale?schema=public"
     $modele = $modele -replace 'DATABASE_URL="[^"]*"', "DATABASE_URL=`"$urlBase`""
 
-    Set-Content -Path $cheminEnv -Value $modele -Encoding UTF8
+    # Sans BOM : Windows PowerShell en met un avec -Encoding UTF8, et
+    # la premiere cle du fichier deviendrait illisible pour Node.
+    [IO.File]::WriteAllText($cheminEnv, $modele, (New-Object Text.UTF8Encoding $false))
     Ecrire-Bien 'configuration ecrite, avec des secrets tires au hasard'
 }
 
@@ -254,6 +321,34 @@ if (Test-Path $cheminEnv) {
 Ecrire-Etape 'Base de donnees'
 
 Set-Location (Join-Path $Dossier 'apps\api')
+
+# « prisma migrate deploy » cree les tables dans une base existante,
+# mais ne cree pas la base elle-meme : sur une machine neuve, seule
+# « postgres » existe.
+$psql = Trouver-Psql
+if ($psql -and $MotDePassePostgres) {
+    $env:PGPASSWORD = $MotDePassePostgres
+    try {
+        $presente = & $psql -U postgres -h localhost -p 5432 -d postgres -tAc `
+            "SELECT 1 FROM pg_database WHERE datname = 'gestglobale'" 2>&1
+        if ("$presente".Trim() -eq '1') {
+            Ecrire-Bien 'base « gestglobale » deja presente'
+        } else {
+            & $psql -U postgres -h localhost -p 5432 -d postgres `
+                -c 'CREATE DATABASE gestglobale' | Out-Host
+            if ($LASTEXITCODE -ne 0) {
+                Arreter 'la creation de la base « gestglobale » a echoue.' `
+                    ('Verifiez que PostgreSQL est demarre (services.msc) et que le mot de ' +
+                     'passe du compte postgres est le bon.')
+            }
+            Ecrire-Bien 'base « gestglobale » creee'
+        }
+    } finally {
+        Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+    }
+} elseif (-not $psql) {
+    Ecrire-Alerte 'psql introuvable : si la base « gestglobale » n existe pas encore, creez-la a la main'
+}
 
 & npx prisma migrate deploy | Out-Host
 if ($LASTEXITCODE -ne 0) {
