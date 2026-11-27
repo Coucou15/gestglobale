@@ -103,13 +103,27 @@ renseignez :
   tirees au hasard. Pour en produire une :
 
 ```powershell
-[Convert]::ToHexString((New-Object byte[] 32 | ForEach-Object { $_ }; $b = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); $b))
+$b = New-Object byte[] 32
+[Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b)
+($b | ForEach-Object { $_.ToString('x2') }) -join ''
 ```
 
 Ne laissez jamais les valeurs d'exemple : elles sont publiees dans le
 depot, et qui les connait peut fabriquer un jeton valide.
 
 ### 3.6 Creer la base
+
+D'abord la base elle-meme. `prisma migrate deploy` cree les tables
+dans une base existante, mais ne cree pas la base : sur une machine
+neuve, seule `postgres` existe. `psql` n'est pas dans le PATH apres
+l'installation de PostgreSQL, d'ou le chemin complet (ajustez le
+numero de version) :
+
+```powershell
+& "C:\Program Files\PostgreSQL\16\bin\psql.exe" -U postgres -h localhost -c "CREATE DATABASE gestglobale"
+```
+
+Il demande le mot de passe choisi en 3.1. Ensuite les tables :
 
 ```powershell
 cd C:\GestGlobale\apps\api
@@ -123,7 +137,16 @@ npx prisma migrate deploy
 pnpm seed
 ```
 
-Le jeu de donnees de demonstration est alors en place. **Pour une
+Le jeu de donnees de demonstration est alors en place.
+
+Si une de ces deux commandes se plaint que « @prisma/client did not
+initialize yet », c'est que le client Prisma n'a pas ete genere :
+
+```powershell
+npx prisma generate
+```
+
+puis reprenez. `pnpm install` le fait normalement tout seul. **Pour une
 vraie installation**, c'est ici qu'on importe l'export de l'ancien
 logiciel a la place — voir l'ecran « Import » du back-office.
 

@@ -292,6 +292,20 @@ Ecrire-Etape 'Dependances'
 if ($LASTEXITCODE -ne 0) { Arreter 'pnpm install a echoue.' 'Lisez le message ci-dessus.' }
 Ecrire-Bien 'dependances installees'
 
+# « pnpm install » genere deja le client Prisma, mais pas si les
+# scripts d'installation ont ete sautes. Sans lui, le chargement des
+# donnees et la construction echouent tous les deux, et le message ne
+# dit pas pourquoi.
+Push-Location (Join-Path $Dossier 'apps\api')
+try {
+    & npx prisma generate | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        Arreter 'la generation du client Prisma a echoue.' `
+            'Lisez le message ci-dessus : sans lui, rien ne peut demarrer.'
+    }
+} finally { Pop-Location }
+Ecrire-Bien 'client Prisma genere'
+
 # --------------------------------------------------------------------
 
 Ecrire-Etape 'Configuration'
@@ -360,7 +374,9 @@ Ecrire-Bien 'tables creees'
 
 & pnpm seed | Out-Host
 if ($LASTEXITCODE -ne 0) {
-    Ecrire-Alerte 'le jeu de demonstration n a pas pu etre charge (la base est peut-etre deja remplie)'
+    Ecrire-Alerte 'le jeu de demonstration n a pas pu etre charge'
+    Ecrire-Alerte 'si la base vient d etre creee, c est une vraie panne : lisez le message ci-dessus'
+    Ecrire-Alerte 'si elle contenait deja des donnees, c est normal'
 } else {
     Ecrire-Bien 'jeu de demonstration en place'
 }
